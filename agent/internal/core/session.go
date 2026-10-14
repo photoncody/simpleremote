@@ -250,6 +250,9 @@ func (s *Session) onSignal(env proto.Envelope) error {
 		if h.ResumeToken != "" {
 			s.resumeToken = h.ResumeToken
 		}
+		// The user allowed the session but the server never got the answer
+		// (the connection dropped while sending): send it again.
+		resendConsent := s.consented && !h.Resumed
 		alreadyConsented := s.consented || h.Resumed
 		s.consented = alreadyConsented
 		startWaiter := !alreadyConsented && !s.consentWaiting
@@ -261,6 +264,11 @@ func (s *Session) onSignal(env proto.Envelope) error {
 			Hostname: platform.Hostname(), OS: runtime.GOOS, Arch: runtime.GOARCH,
 			Username: platform.Username(), Version: s.opts.Version, Elevated: platform.IsElevated(),
 		})
+		if resendConsent {
+			if err := s.send(proto.TypeConsent, proto.Consent{Allowed: true}); err != nil {
+				s.log.Warn("resend consent", "err", err)
+			}
+		}
 		if alreadyConsented {
 			s.opts.UI.Active(h)
 			if p := platform.CheckPermissions(); !p.OK() {

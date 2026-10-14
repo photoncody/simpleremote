@@ -55,6 +55,9 @@ const HIGH_WATER = 1 << 20;
 export class RemoteSession {
   private ws: WebSocket | null = null;
   private pc: RTCPeerConnection | null = null;
+  // Candidates that arrive before the agent's answer is installed.
+  private remoteSet = false;
+  private pendingIce: RTCIceCandidateInit[] = [];
   private ch: Partial<Record<string, RTCDataChannel>> = {};
   private hello: Hello | null = null;
   private status: Status | null = null;
@@ -166,11 +169,24 @@ export class RemoteSession {
         }
         break;
       }
-      case 'answer':
-        this.pc?.setRemoteDescription(env.data as RTCSessionDescriptionInit).catch((e) => this.on.error?.(String(e)));
+      case 'answer': {
+        const pc = this.pc;
+        if (!pc) break;
+        pc.setRemoteDescription(env.data as RTCSessionDescriptionInit)
+          .then(() => {
+            if (pc !== this.pc) return;
+            this.remoteSet = true;
+            for (const c of this.pendingIce.splice(0)) pc.addIceCandidate(c).catch(() => {});
+          })
+          .catch((e) => this.on.error?.(String(e)));
         break;
+      }
       case 'ice':
-        if (env.data) this.pc?.addIceCandidate(env.data as RTCIceCandidateInit).catch(() => {});
+        if (!env.data || !this.pc) break;
+        // addIceCandidate fails until the answer is installed, so hold
+        // early candidates instead of dropping them.
+        if (this.remoteSet) this.pc.addIceCandidate(env.data as RTCIceCandidateInit).catch(() => {});
+        else this.pendingIce.push(env.data as RTCIceCandidateInit);
         break;
       case 'end':
         this.on.conn?.('ended');
@@ -186,6 +202,8 @@ export class RemoteSession {
   // ---- WebRTC ----
 
   private teardownRTC() {
+    this.remoteSet = false;
+    this.pendingIce = [];
     this.pc?.close();
     this.pc = null;
     this.ch = {};
