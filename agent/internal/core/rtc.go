@@ -69,13 +69,19 @@ func (s *Session) handleOffer(sdp proto.SDP) {
 		s.log.Error("create peer connection", "err", err)
 		return
 	}
-	s.mu.Lock()
-	s.rtc = p
-	s.mu.Unlock()
-
 	if err := p.pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: sdp.SDP}); err != nil {
 		s.log.Error("set remote description", "err", err)
+		p.close()
 		return
+	}
+	// Only now can candidates be added; apply any that arrived early.
+	s.mu.Lock()
+	s.rtc = p
+	pending := s.pendingICE
+	s.pendingICE = nil
+	s.mu.Unlock()
+	for _, c := range pending {
+		p.addCandidate(c)
 	}
 	answer, err := p.pc.CreateAnswer(nil)
 	if err != nil {

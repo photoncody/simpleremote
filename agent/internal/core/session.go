@@ -68,6 +68,12 @@ type Session struct {
 	ended       bool
 	handoff     bool
 	rtc         *peer
+	// consentWaiting is set while a consent prompt is open, so a signaling
+	// reconnect doesn't start a second waiter.
+	consentWaiting bool
+	// pendingICE holds candidates that arrive before the peer connection
+	// has the tech's offer installed.
+	pendingICE []proto.ICECandidate
 
 	consentCh chan bool
 }
@@ -246,6 +252,10 @@ func (s *Session) onSignal(env proto.Envelope) error {
 		}
 		alreadyConsented := s.consented || h.Resumed
 		s.consented = alreadyConsented
+		startWaiter := !alreadyConsented && !s.consentWaiting
+		if startWaiter {
+			s.consentWaiting = true
+		}
 		s.mu.Unlock()
 		_ = s.send(proto.TypeAgentInfo, proto.AgentInfo{
 			Hostname: platform.Hostname(), OS: runtime.GOOS, Arch: runtime.GOARCH,
@@ -253,9 +263,14 @@ func (s *Session) onSignal(env proto.Envelope) error {
 		})
 		if alreadyConsented {
 			s.opts.UI.Active(h)
+			if p := platform.CheckPermissions(); !p.OK() {
+				s.opts.UI.NeedPermissions(p)
+			}
 			return nil
 		}
-		go s.awaitConsent(h)
+		if startWaiter {
+			go s.awaitConsent(h)
+		}
 
 	case proto.TypeOffer:
 		var sdp proto.SDP
@@ -269,13 +284,18 @@ func (s *Session) onSignal(env proto.Envelope) error {
 			// The server never relays offers before consent; ignore anyway.
 			return nil
 		}
-		go s.handleOffer(sdp)
+		// Handled in order, so ICE candidates that follow the offer find the
+		// peer connection ready.
+		s.handleOffer(sdp)
 
 	case proto.TypeICE:
 		var c proto.ICECandidate
 		if json.Unmarshal(env.Data, &c) == nil {
 			s.mu.Lock()
 			p := s.rtc
+			if p == nil && len(s.pendingICE) < 100 {
+				s.pendingICE = append(s.pendingICE, c)
+			}
 			s.mu.Unlock()
 			if p != nil {
 				p.addCandidate(c)
@@ -318,14 +338,13 @@ func (s *Session) awaitConsent(h proto.Hello) {
 	case <-s.ctx.Done():
 		return
 	}
+	s.mu.Lock()
+	s.consentWaiting = false
+	s.mu.Unlock()
 	if !allowed {
 		_ = s.send(proto.TypeConsent, proto.Consent{Allowed: false})
 		s.finish("You declined the connection.", false)
 		return
-	}
-	if p := platform.CheckPermissions(); !p.OK() {
-		platform.RequestPermissions()
-		s.opts.UI.NeedPermissions(p)
 	}
 	s.mu.Lock()
 	s.consented = true
@@ -334,6 +353,12 @@ func (s *Session) awaitConsent(h proto.Hello) {
 		s.log.Warn("send consent", "err", err)
 	}
 	s.opts.UI.Active(h)
+	// Ask for missing macOS permissions only after consent is recorded, so
+	// the restart this needs can resume the session.
+	if p := platform.CheckPermissions(); !p.OK() {
+		platform.RequestPermissions()
+		s.opts.UI.NeedPermissions(p)
+	}
 }
 
 // Respond records the user's answer to the consent prompt.
@@ -375,26 +400,40 @@ func (s *Session) DeclineElevation() {
 // Elevate relaunches the agent as administrator. On success this process
 // hands the session over to the new one and should exit.
 func (s *Session) Elevate() error {
+	err := s.handoffTo(platform.RelaunchElevated, "elevation_accepted")
+	if errors.Is(err, platform.ErrCancelled) {
+		s.DeclineElevation()
+	}
+	return err
+}
+
+// Restart relaunches the agent, for example so macOS applies a newly granted
+// Screen Recording permission. On success this process hands the session
+// over to the new one and should exit.
+func (s *Session) Restart() error {
+	return s.handoffTo(platform.Relaunch, "agent_restarted")
+}
+
+// handoffTo starts a new agent process that resumes this session with the
+// resume token, then disconnects without ending the session.
+func (s *Session) handoffTo(relaunch func([]string) error, auditKind string) error {
 	s.mu.Lock()
 	token, server, org := s.resumeToken, s.opts.ServerURL, s.hello.OrgName
+	consented := s.consented
 	s.mu.Unlock()
-	if token == "" {
+	if token == "" || !consented {
 		return errors.New("not connected")
 	}
-	err := platform.RelaunchElevated([]string{"--server", server, "--resume", token, "--org", org})
-	if err != nil {
-		if errors.Is(err, platform.ErrCancelled) {
-			s.DeclineElevation()
-		}
+	if err := relaunch([]string{"--server", server, "--resume", token, "--org", org}); err != nil {
 		return err
 	}
-	s.audit("elevation_accepted", "")
+	s.audit(auditKind, "")
 	s.mu.Lock()
 	s.handoff = true
 	ws := s.ws
 	s.mu.Unlock()
 	if ws != nil {
-		ws.Close(websocket.StatusNormalClosure, "relaunching elevated")
+		ws.Close(websocket.StatusNormalClosure, "handing over to a new agent process")
 	}
 	s.cancel()
 	return nil

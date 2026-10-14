@@ -11,6 +11,7 @@
 
   let me = $state<Me | null>(null);
   let checking = $state(false);
+  let redirecting = $state(false);
   let loadError = $state('');
 
   const path = $derived(router.path.replace(/\/+$/, '') || '/');
@@ -18,8 +19,10 @@
   const isTech = $derived(path.startsWith('/tech') && !isLogin);
   const sessionMatch = $derived(path.match(/^\/tech\/session\/([A-Za-z0-9_-]+)$/));
 
+  // Runs once per visit to a tech page. After a failure it waits for the
+  // user to retry instead of looping.
   $effect(() => {
-    if (isTech && !me && !checking) void ensureSignedIn();
+    if (isTech && !me && !checking && !redirecting && !loadError) void ensureSignedIn();
   });
 
   async function ensureSignedIn() {
@@ -33,8 +36,12 @@
       }
       const next = encodeURIComponent(location.pathname + location.search);
       const cfg = await getAuthConfig();
-      if (cfg.auto_login) location.href = `/auth/oidc/login?next=${next}`;
-      else router.navigate(`/tech/login?next=${next}`, true);
+      if (cfg.auto_login) {
+        redirecting = true;
+        location.href = `/auth/oidc/login?next=${next}`;
+      } else {
+        router.navigate(`/tech/login?next=${next}`, true);
+      }
     } catch (e) {
       loadError = e instanceof Error ? e.message : String(e);
     } finally {
@@ -56,7 +63,12 @@
   <LocalLogin />
 {:else if isTech}
   {#if loadError}
-    <main class="center"><p class="error">Could not reach the server: {loadError}</p></main>
+    <main class="center">
+      <div>
+        <p class="error">Could not reach the server: {loadError}</p>
+        <button onclick={() => (loadError = '')}>Try again</button>
+      </div>
+    </main>
   {:else if !me}
     <main class="center"><p class="muted">Loading…</p></main>
   {:else if sessionMatch}

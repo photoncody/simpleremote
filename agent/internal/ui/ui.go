@@ -202,13 +202,24 @@ func (u *App) NeedPermissions(p platform.Permissions) {
 		if !p.Accessibility {
 			missing = append(missing, "Accessibility")
 		}
-		d := dialog.NewCustom("Permission needed", "OK", container.NewVBox(
+		restart := widget.NewButton("Restart SimpleRemote", func() {
+			// The new process resumes this session, so the user doesn't need
+			// a new code.
+			if err := u.sess.Restart(); err != nil {
+				dialog.ShowError(err, u.w)
+				return
+			}
+			u.a.Quit()
+		})
+		restart.Importance = widget.HighImportance
+		d := dialog.NewCustom("Permission needed", "Later", container.NewVBox(
 			wrapLabel("macOS needs your permission before the technician can help: "+strings.Join(missing, " and ")+"."),
-			wrapLabel("In System Settings → Privacy & Security, turn on SimpleRemote for each one. "+
-				"After turning on Screen Recording, quit and reopen this app."),
+			wrapLabel("In System Settings → Privacy & Security, turn on SimpleRemote for each one, "+
+				"then click Restart SimpleRemote. Your session stays connected."),
 			widget.NewButton("Open System Settings", platform.OpenPermissionSettings),
+			restart,
 		), u.w)
-		d.Resize(fyne.NewSize(400, 260))
+		d.Resize(fyne.NewSize(400, 300))
 		d.Show()
 	})
 }

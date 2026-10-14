@@ -4,8 +4,10 @@ package platform
 
 import (
 	"os"
+	"os/exec"
 	"os/user"
 	"runtime"
+	"strings"
 )
 
 // Username returns the logged-in user's name.
@@ -33,3 +35,20 @@ type Permissions struct {
 
 // OK reports whether everything needed is granted.
 func (p Permissions) OK() bool { return p.ScreenRecording && p.Accessibility }
+
+// Relaunch starts a new copy of the agent with args. On macOS the app bundle
+// is reopened through Launch Services so the new process picks up privacy
+// permissions granted since this one started.
+func Relaunch(args []string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if runtime.GOOS == "darwin" {
+		if i := strings.Index(exe, ".app/Contents/MacOS/"); i >= 0 {
+			bundle := exe[:i+len(".app")]
+			return exec.Command("open", append([]string{"-n", bundle, "--args"}, args...)...).Start()
+		}
+	}
+	return exec.Command(exe, args...).Start()
+}
