@@ -12,7 +12,7 @@ import (
 	"github.com/photoncody/simpleremote/internal/stamp"
 )
 
-var testStamp = stamp.Stamp{ServerURL: "https://support.example.com", Code: "123456789", OrgName: "Acme"}
+var testStamp = stamp.Stamp{ServerURL: "https://support.example.com", Code: "123456", OrgName: "Acme"}
 
 func TestBinaryStamp(t *testing.T) {
 	dir := t.TempDir()
@@ -32,7 +32,7 @@ func TestBinaryStamp(t *testing.T) {
 	if err != nil || got != testStamp {
 		t.Fatalf("stamp = %+v, %v", got, err)
 	}
-	if Filename(av[0], "123456789") != "SimpleRemote-123456789" {
+	if Filename(av[0], "123456") != "SimpleRemote-123456" {
 		t.Fatal("filename")
 	}
 	p, _ := Lookup("windows-amd64")
@@ -69,7 +69,7 @@ func TestZipStamp(t *testing.T) {
 	found := map[string]bool{}
 	for _, f := range zr.File {
 		found[f.Name] = true
-		if f.Name == "SimpleRemote-123456789.app/Contents/MacOS/simpleremote-agent" {
+		if f.Name == "SimpleRemote-123456.app/Contents/MacOS/simpleremote-agent" {
 			if f.Mode()&0o111 == 0 {
 				t.Error("executable bit lost")
 			}
@@ -82,7 +82,7 @@ func TestZipStamp(t *testing.T) {
 			}
 		}
 	}
-	if !found["SimpleRemote-123456789.app/Contents/Info.plist"] {
+	if !found["SimpleRemote-123456.app/Contents/Info.plist"] {
 		t.Fatalf("entries = %v", found)
 	}
 }

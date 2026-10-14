@@ -1,7 +1,7 @@
 // Command stamp writes or reads the connection stamp on an agent binary. CI
 // uses it to check that stamped binaries still run on every platform.
 //
-//	stamp -in agent -out stamped -server https://support.example.com -code 123456789
+//	stamp -in agent -out stamped -server https://support.example.com -code 123456
 //	stamp -read stamped
 package main
 
@@ -19,7 +19,7 @@ func main() {
 	in := flag.String("in", "", "agent binary to stamp")
 	out := flag.String("out", "", "where to write the stamped binary")
 	server := flag.String("server", "https://support.example.com", "server URL")
-	code := flag.String("code", "123456789", "session code")
+	code := flag.String("code", "123456", "session code")
 	read := flag.String("read", "", "print the stamp of this file and exit")
 	flag.Parse()
 

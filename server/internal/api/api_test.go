@@ -56,13 +56,13 @@ func TestPublicCodeAndDownload(t *testing.T) {
 	srv, m := newServer(t)
 	ss, _ := m.Create(context.Background(), auth.Identity{Subject: "s", Name: "Tech"}, "")
 
-	resp, _ := http.Post(srv.URL+"/api/public/code", "application/json", strings.NewReader(`{"code":"000-000-000"}`))
+	resp, _ := http.Post(srv.URL+"/api/public/code", "application/json", strings.NewReader(`{"code":"000000"}`))
 	resp.Body.Close()
 	if resp.StatusCode != 404 {
 		t.Fatalf("bad code = %d", resp.StatusCode)
 	}
 
-	resp, _ = http.Post(srv.URL+"/api/public/code", "application/json", strings.NewReader(`{"code":"`+stamp.FormatCode(ss.Code)+`"}`))
+	resp, _ = http.Post(srv.URL+"/api/public/code", "application/json", strings.NewReader(`{"code":" `+ss.Code+` "}`))
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != 200 || !strings.Contains(string(body), "windows-amd64") || !strings.Contains(string(body), `"tech_name":"Tech"`) {

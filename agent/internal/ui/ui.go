@@ -112,8 +112,8 @@ func (u *App) showSetup() {
 	server.SetPlaceHolder("https://support.example.com")
 	server.SetText(u.opts.ServerURL)
 	code := widget.NewEntry()
-	code.SetPlaceHolder("123-456-789")
-	code.SetText(stamp.FormatCode(u.opts.Code))
+	code.SetPlaceHolder("123456")
+	code.SetText(u.opts.Code)
 	errLabel := widget.NewLabel("")
 	errLabel.Importance = widget.DangerImportance
 	connect := widget.NewButton("Connect", nil)
@@ -130,7 +130,7 @@ func (u *App) showSetup() {
 		}
 		c := stamp.NormalizeCode(code.Text)
 		if !stamp.IsCode(c) {
-			errLabel.SetText("The code has 9 digits.")
+			errLabel.SetText("The code has 6 digits.")
 			return
 		}
 		u.start(s, c)

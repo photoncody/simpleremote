@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { formatBytes, formatCode, formatDuration } from './format';
+import { cleanCode, formatBytes, formatDuration } from './format';
 
 describe('format', () => {
-  it('formats codes as they are typed', () => {
-    expect(formatCode('1')).toBe('1');
-    expect(formatCode('1234')).toBe('123-4');
-    expect(formatCode(' 123 456 789 0')).toBe('123-456-789');
+  it('cleans codes as they are typed', () => {
+    expect(cleanCode('1')).toBe('1');
+    expect(cleanCode(' 123 456 ')).toBe('123456');
+    expect(cleanCode('123-4567')).toBe('123456');
   });
 
   it('formats bytes', () => {

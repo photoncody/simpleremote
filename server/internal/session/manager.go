@@ -90,9 +90,11 @@ func newID() string {
 }
 
 func newCode() string {
-	// 100000000..999999999 so codes never start with zero.
-	n, _ := rand.Int(rand.Reader, big.NewInt(900_000_000))
-	return fmt.Sprintf("%09d", n.Int64()+100_000_000)
+	// 100000..999999: six digits that never start with zero, easy to read
+	// out over the phone. Guessing is limited by per-IP rate limits, the
+	// short CODE_TTL, single use, and the user's consent prompt.
+	n, _ := rand.Int(rand.Reader, big.NewInt(900_000))
+	return fmt.Sprintf("%06d", n.Int64()+100_000)
 }
 
 // Create issues a new session code for tech.

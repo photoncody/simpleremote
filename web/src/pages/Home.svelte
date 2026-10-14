@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, ApiError, type CodeCheck, type Platform } from '../lib/api';
-  import { detectArch, detectOS, formatBytes, formatCode, type ClientOS } from '../lib/format';
+  import { CODE_LENGTH, cleanCode, detectArch, detectOS, formatBytes, type ClientOS } from '../lib/format';
 
   let orgName = $state('');
   let code = $state('');
@@ -27,14 +27,15 @@
 
   function onInput(e: Event) {
     const el = e.currentTarget as HTMLInputElement;
-    code = formatCode(el.value);
+    code = cleanCode(el.value);
+    el.value = code;
     error = '';
   }
 
   async function submit(e: SubmitEvent) {
     e.preventDefault();
-    if (digits.length !== 9) {
-      error = 'The code has 9 digits.';
+    if (digits.length !== CODE_LENGTH) {
+      error = `The code has ${CODE_LENGTH} digits.`;
       return;
     }
     busy = true;
@@ -73,14 +74,15 @@
           class="code big"
           inputmode="numeric"
           autocomplete="one-time-code"
-          placeholder="123-456-789"
+          placeholder="123456"
+          maxlength={CODE_LENGTH}
           value={code}
           oninput={onInput}
           aria-invalid={!!error}
           aria-describedby={error ? 'code-error' : undefined}
         />
         {#if error}<p id="code-error" class="error" role="alert">{error}</p>{/if}
-        <button class="primary wide" disabled={busy || digits.length !== 9}>{busy ? 'Checking…' : 'Continue'}</button>
+        <button class="primary wide" disabled={busy || digits.length !== CODE_LENGTH}>{busy ? 'Checking…' : 'Continue'}</button>
       </form>
       <p class="muted small">
         Only use a code from someone you trust and are talking to right now. Your technician will be able to see and

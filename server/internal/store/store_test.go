@@ -41,7 +41,7 @@ func TestTechSessions(t *testing.T) {
 func TestSupportSessions(t *testing.T) {
 	s, ctx := newStore(t), context.Background()
 	now := time.Now().Truncate(time.Millisecond)
-	ss := SupportSession{ID: "s1", Code: "123456789", State: "pending", Live: true, TechSubject: "x", TechName: "Tech",
+	ss := SupportSession{ID: "s1", Code: "123456", State: "pending", Live: true, TechSubject: "x", TechName: "Tech",
 		CreatedAt: now, CodeExpiresAt: now.Add(10 * time.Minute)}
 	if err := s.InsertSupportSession(ctx, ss); err != nil {
 		t.Fatal(err)
@@ -52,7 +52,7 @@ func TestSupportSessions(t *testing.T) {
 		t.Fatalf("duplicate live code: %v", err)
 	}
 
-	got, err := s.GetLiveSessionByCode(ctx, "123456789")
+	got, err := s.GetLiveSessionByCode(ctx, "123456")
 	if err != nil || got.ID != "s1" || !got.CreatedAt.Equal(now) || !got.ConnectedAt.IsZero() {
 		t.Fatalf("got %+v, %v", got, err)
 	}
@@ -61,7 +61,7 @@ func TestSupportSessions(t *testing.T) {
 	if err := s.UpdateSupportSession(ctx, got); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.GetLiveSessionByCode(ctx, "123456789"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.GetLiveSessionByCode(ctx, "123456"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("ended session still live: %v", err)
 	}
 	// The code can be reused once the old session is no longer live.
@@ -86,7 +86,7 @@ func TestSupportSessions(t *testing.T) {
 func TestEventsAndPurge(t *testing.T) {
 	s, ctx := newStore(t), context.Background()
 	old := time.Now().Add(-48 * time.Hour)
-	_ = s.InsertSupportSession(ctx, SupportSession{ID: "old", Code: "111111111", State: "ended", CreatedAt: old, CodeExpiresAt: old})
+	_ = s.InsertSupportSession(ctx, SupportSession{ID: "old", Code: "111111", State: "ended", CreatedAt: old, CodeExpiresAt: old})
 	_ = s.AddEvent(ctx, Event{SessionID: "old", At: old, Actor: "tech", Kind: "created"})
 	_ = s.AddEvent(ctx, Event{Actor: "admin", Kind: "login"})
 

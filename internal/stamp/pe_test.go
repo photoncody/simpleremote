@@ -34,7 +34,7 @@ func winCert(payload int) []byte {
 
 func TestAppendPEUnsigned(t *testing.T) {
 	base := fakePE(nil)
-	tr, _ := Trailer(Stamp{ServerURL: "https://x", Code: "123456789"})
+	tr, _ := Trailer(Stamp{ServerURL: "https://x", Code: "123456"})
 	out, err := AppendPE(base, tr)
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func TestAppendPEUnsigned(t *testing.T) {
 func TestAppendPESigned(t *testing.T) {
 	cert := winCert(100) // 108 bytes, padded to 112
 	base := fakePE(cert)
-	s := Stamp{ServerURL: "https://support.example.com", Code: "987654321"}
+	s := Stamp{ServerURL: "https://support.example.com", Code: "987654"}
 	tr, _ := Trailer(s)
 	out, err := AppendPE(base, tr)
 	if err != nil {

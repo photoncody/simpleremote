@@ -10,7 +10,7 @@ import (
 
 func TestRoundTrip(t *testing.T) {
 	base := []byte("\x7fELF fake binary contents")
-	s := Stamp{ServerURL: "https://support.example.com", Code: "123456789", OrgName: "Example"}
+	s := Stamp{ServerURL: "https://support.example.com", Code: "123456", OrgName: "Example"}
 
 	var buf bytes.Buffer
 	if err := Write(&buf, base, s); err != nil {
@@ -43,10 +43,10 @@ func TestRoundTrip(t *testing.T) {
 func TestRestampReplaces(t *testing.T) {
 	base := []byte("binary")
 	var first, second bytes.Buffer
-	_ = Write(&first, base, Stamp{ServerURL: "https://a", Code: "111111111"})
-	_ = Write(&second, first.Bytes(), Stamp{ServerURL: "https://b", Code: "222222222"})
+	_ = Write(&first, base, Stamp{ServerURL: "https://a", Code: "111111"})
+	_ = Write(&second, first.Bytes(), Stamp{ServerURL: "https://b", Code: "222222"})
 	got, err := Parse(second.Bytes())
-	if err != nil || got.Code != "222222222" {
+	if err != nil || got.Code != "222222" {
 		t.Fatalf("got %+v, %v", got, err)
 	}
 	if !bytes.Equal(Strip(second.Bytes()), base) {
@@ -66,27 +66,27 @@ func TestUnstamped(t *testing.T) {
 }
 
 func TestRejectsBadStamp(t *testing.T) {
-	if _, err := Trailer(Stamp{ServerURL: "ftp://x", Code: "123456789"}); err == nil {
+	if _, err := Trailer(Stamp{ServerURL: "ftp://x", Code: "123456"}); err == nil {
 		t.Fatal("expected error for bad URL")
 	}
-	if _, err := Trailer(Stamp{ServerURL: "https://x", Code: "12345"}); err == nil {
+	if _, err := Trailer(Stamp{ServerURL: "https://x", Code: "123456789"}); err == nil {
 		t.Fatal("expected error for bad code")
 	}
 }
 
 func TestCodeHelpers(t *testing.T) {
-	if NormalizeCode(" 123-456 789 ") != "123456789" {
+	if NormalizeCode(" 123 456 ") != "123456" {
 		t.Fatal("NormalizeCode")
 	}
-	if FormatCode("123456789") != "123-456-789" {
-		t.Fatal("FormatCode")
+	if !IsCode("123456") || IsCode("12345") || IsCode("1234567") || IsCode("12345a") {
+		t.Fatal("IsCode")
 	}
 	cases := map[string]string{
-		"SimpleRemote-123456789.exe":            "123456789",
-		"/Downloads/SimpleRemote-123456789 (1)": "123456789",
-		"SimpleRemote-123-456-789.app":          "123456789",
-		"SimpleRemote.exe":                      "",
-		"SimpleRemote-1234567890.exe":           "",
+		"SimpleRemote-123456.exe":            "123456",
+		"/Downloads/SimpleRemote-123456 (1)": "123456",
+		"SimpleRemote-123456.app":            "123456",
+		"SimpleRemote.exe":                   "",
+		"SimpleRemote-1234567.exe":           "",
 	}
 	for in, want := range cases {
 		if got := CodeFromFilename(in); got != want {

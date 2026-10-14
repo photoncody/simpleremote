@@ -72,7 +72,7 @@
 
   async function copyInstructions() {
     if (!created) return;
-    const text = `Go to ${created.join_url} and enter code ${created.code_formatted}`;
+    const text = `Go to ${created.join_url} and enter code ${created.code}`;
     try {
       await navigator.clipboard.writeText(text);
       copied = true;
@@ -97,7 +97,7 @@
   <section class="card newsession" aria-live="polite">
     {#if secondsLeft > 0 && (!createdLive || createdLive.state === 'pending')}
       <p class="muted">Ask the user to go to <strong>{created.join_url}</strong> and enter:</p>
-      <p class="bigcode code">{created.code_formatted}</p>
+      <p class="bigcode code">{created.code}</p>
       <p class="muted">
         Code expires in {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')}. Waiting for the user…
       </p>
@@ -107,7 +107,7 @@
         <button class="danger" onclick={() => end(created!.id)}>Cancel</button>
       </div>
     {:else if secondsLeft === 0 && (!createdLive || createdLive.state === 'pending')}
-      <p>The code <span class="code">{created.code_formatted}</span> expired before it was used.</p>
+      <p>The code <span class="code">{created.code}</span> expired before it was used.</p>
       <button onclick={() => (created = null)}>Dismiss</button>
     {/if}
   </section>
@@ -125,7 +125,7 @@
       <tbody>
         {#each mine as s (s.id)}
           <tr>
-            <td class="code">{s.code.replace(/(\d{3})(\d{3})(\d{3})/, '$1-$2-$3')}</td>
+            <td class="code">{s.code}</td>
             <td><span class="badge {badgeClass(s.state)}">{stateLabels[s.state] ?? s.state}</span>
               {#if s.state !== 'pending' && !s.agent_connected}<span class="badge waiting">agent offline</span>{/if}</td>
             <td>

@@ -13,10 +13,10 @@ Simple, self-hosted, **attended** remote support. A technician creates a one-tim
  Technician's browser                 SimpleRemote server                End user's computer
  ───────────────────                  ───────────────────                ───────────────────
  Sign in (OIDC) ───────────────────▶  checks group/email/domain rules
- "New session" ────────────────────▶  issues code 123-456-789
+ "New session" ────────────────────▶  issues code 482913     
                                       (single-use, expires in 10 min)
                                                                    ◀──── enters code on the website
-                                      stamps server URL + code     ────▶ downloads SimpleRemote-123456789.exe
+                                      stamps server URL + code     ────▶ downloads SimpleRemote-482913.exe
                                       into the agent download            runs it
                                                                    ◀──── agent joins with the code
                                       relays tech's name and org   ────▶ "Allow Jane (IT) to control this computer?"

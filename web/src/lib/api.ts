@@ -103,7 +103,6 @@ export interface LiveSession extends SupportSession {
 export interface CreatedSession {
   id: string;
   code: string;
-  code_formatted: string;
   code_expires_at: string;
   expires_in: number;
   join_url: string;
@@ -129,7 +128,6 @@ export interface Platform {
 
 export interface CodeCheck {
   code: string;
-  code_formatted: string;
   org_name: string;
   tech_name: string;
   code_expires_at: string;

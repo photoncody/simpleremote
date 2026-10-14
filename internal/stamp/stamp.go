@@ -158,15 +158,18 @@ func decode(js []byte) (Stamp, error) {
 	return s, nil
 }
 
+// CodeLength is the number of digits in a session code.
+const CodeLength = 6
+
 var (
-	codeRE     = regexp.MustCompile(`^[0-9]{9}$`)
-	nameCodeRE = regexp.MustCompile(`(?:^|[^0-9])([0-9]{3})-?([0-9]{3})-?([0-9]{3})(?:[^0-9]|$)`)
+	codeRE     = regexp.MustCompile(`^[0-9]{6}$`)
+	nameCodeRE = regexp.MustCompile(`(?:^|[^0-9])([0-9]{6})(?:[^0-9]|$)`)
 )
 
-// IsCode reports whether s is a normalized session code (nine digits).
+// IsCode reports whether s is a normalized session code (six digits).
 func IsCode(s string) bool { return codeRE.MatchString(s) }
 
-// NormalizeCode strips spaces and dashes from user input.
+// NormalizeCode keeps only the digits of user input (dropping spaces and dashes).
 func NormalizeCode(s string) string {
 	return strings.Map(func(r rune) rune {
 		if r >= '0' && r <= '9' {
@@ -176,21 +179,13 @@ func NormalizeCode(s string) string {
 	}, s)
 }
 
-// FormatCode renders a code as 123-456-789.
-func FormatCode(code string) string {
-	if len(code) != 9 {
-		return code
-	}
-	return code[:3] + "-" + code[3:6] + "-" + code[6:]
-}
-
 // CodeFromFilename finds a session code in a download's file name, such as
-// "SimpleRemote-123456789.exe" or "SimpleRemote-123456789 (1).app". It is a
+// "SimpleRemote-123456.exe" or "SimpleRemote-123456 (1).app". It is a
 // fallback for when the stamp can't be read.
 func CodeFromFilename(path string) string {
 	m := nameCodeRE.FindStringSubmatch(filepath.Base(path))
 	if m == nil {
 		return ""
 	}
-	return m[1] + m[2] + m[3]
+	return m[1]
 }

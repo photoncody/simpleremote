@@ -36,8 +36,8 @@
   const live = $derived(conn === 'connected');
 
   $effect(() => {
-    api<{ code_formatted: string }>('GET', `/api/sessions/${id}`)
-      .then((r) => (code = r.code_formatted))
+    api<{ session: { code: string } }>('GET', `/api/sessions/${id}`)
+      .then((r) => (code = r.session.code))
       .catch((e) => (error = e.message));
   });
 

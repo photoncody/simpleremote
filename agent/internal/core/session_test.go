@@ -69,7 +69,7 @@ func TestReconnectKeepsOneConsentWaiter(t *testing.T) {
 	defer srv.Close()
 
 	ui := &fakeUI{ended: make(chan string, 1), active: make(chan struct{}, 4)}
-	s := New(Options{ServerURL: srv.URL, Code: "123456789", UI: ui, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	s := New(Options{ServerURL: srv.URL, Code: "123456", UI: ui, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	go s.Run()
 	defer s.finish("test over", false)
 
@@ -142,7 +142,7 @@ func TestConsentResentAfterReconnect(t *testing.T) {
 	defer srv.Close()
 
 	ui := &fakeUI{ended: make(chan string, 1), active: make(chan struct{}, 4)}
-	s := New(Options{ServerURL: srv.URL, Code: "123456789", UI: ui, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	s := New(Options{ServerURL: srv.URL, Code: "123456", UI: ui, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	go s.Run()
 	defer s.finish("test over", false)
 

@@ -1,6 +1,8 @@
-export function formatCode(input: string): string {
-  const d = input.replace(/\D/g, '').slice(0, 9);
-  return [d.slice(0, 3), d.slice(3, 6), d.slice(6, 9)].filter(Boolean).join('-');
+export const CODE_LENGTH = 6;
+
+// Keeps only the digits of a typed or pasted code, up to CODE_LENGTH.
+export function cleanCode(input: string): string {
+  return input.replace(/\D/g, '').slice(0, CODE_LENGTH);
 }
 
 export function formatBytes(n: number): string {

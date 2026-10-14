@@ -103,7 +103,6 @@ func (s *Server) checkCode(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.WriteJSON(w, 200, map[string]any{
 		"code":            code,
-		"code_formatted":  stamp.FormatCode(code),
 		"org_name":        s.Config.OrgName,
 		"tech_name":       ss.TechName,
 		"code_expires_at": ss.CodeExpiresAt,
@@ -160,7 +159,7 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, 201, map[string]any{
-		"id": ss.ID, "code": ss.Code, "code_formatted": stamp.FormatCode(ss.Code),
+		"id": ss.ID, "code": ss.Code,
 		"code_expires_at": ss.CodeExpiresAt, "expires_in": int(time.Until(ss.CodeExpiresAt).Seconds()),
 		"join_url": s.Config.PublicURL.String() + "/",
 	})
@@ -184,7 +183,7 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snap.Mine = true
-	httpx.WriteJSON(w, 200, map[string]any{"session": snap, "code_formatted": stamp.FormatCode(snap.Code)})
+	httpx.WriteJSON(w, 200, map[string]any{"session": snap})
 }
 
 func (s *Server) endSession(w http.ResponseWriter, r *http.Request) {
