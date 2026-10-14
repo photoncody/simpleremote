@@ -1,0 +1,20 @@
+# Build output
+/bin/
+/dist/*
+!/dist/agents/
+/dist/agents/*
+!/dist/agents/README.md
+/web/dist/*
+!/web/dist/.gitkeep
+node_modules/
+
+# Local data and secrets
+/data/
+.env
+*.db
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

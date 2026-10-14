@@ -1,0 +1,185 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VERSION: ci-${{ github.sha }}
+
+jobs:
+  server:
+    name: Server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./server/... ./internal/... ./tools/...
+      - name: Test
+        run: go test -race ./server/... ./internal/...
+      - name: Build (no cgo)
+        run: CGO_ENABLED=0 go build -o /dev/null ./server/cmd/simpleremote-server
+
+  web:
+    name: Web UI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+
+  agent:
+    name: Agent (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-amd64, os: ubuntu-latest }
+          - { target: linux-arm64, os: ubuntu-24.04-arm }
+          - { target: windows-amd64, os: windows-latest }
+          - { target: darwin-universal, os: macos-latest }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Install build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc pkg-config libgl1-mesa-dev xorg-dev \
+            libxtst-dev libwayland-dev libxkbcommon-dev wayland-protocols
+      - name: Ensure a C compiler (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          if ! command -v gcc >/dev/null; then
+            choco install mingw -y --no-progress
+            echo "C:\\ProgramData\\mingw64\\mingw64\\bin" >> "$GITHUB_PATH"
+          fi
+
+      - name: Test
+        shell: bash
+        run: go test ./agent/... ./internal/...
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist/agents
+          go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \
+            -o dist/agents/simpleremote-agent-${{ matrix.target }} ./agent/cmd/simpleremote-agent
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist/agents
+          go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=$VERSION" \
+            -o dist/agents/simpleremote-agent-windows-amd64.exe ./agent/cmd/simpleremote-agent
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: scripts/build-macos-app.sh "$VERSION" dist/agents
+
+      # The server appends the session details to each download. Make sure a
+      # stamped binary still starts on this platform.
+      - name: Smoke test a stamped agent
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/smoke"; mkdir -p "$tmp"
+          case "${{ runner.os }}" in
+            Linux)
+              go run ./tools/stamp -in dist/agents/simpleremote-agent-${{ matrix.target }} -out "$tmp/agent"
+              "$tmp/agent" --version | grep -qx "$VERSION" ;;
+            macOS)
+              ditto -x -k dist/agents/simpleremote-agent-darwin-universal.zip "$tmp"
+              bin="$tmp/SimpleRemote.app/Contents/MacOS/simpleremote-agent"
+              go run ./tools/stamp -in "$bin" -out "$bin.stamped"
+              arch -arm64 "$bin.stamped" --version | grep -qx "$VERSION"
+              if arch -x86_64 /usr/bin/true 2>/dev/null; then # needs Rosetta
+                arch -x86_64 "$bin.stamped" --version | grep -qx "$VERSION"
+              fi ;;
+            Windows)
+              go run ./tools/stamp -in dist/agents/simpleremote-agent-windows-amd64.exe -out "$tmp/agent.exe"
+              # GUI-subsystem binaries have no console output; check the exit code.
+              "$tmp/agent.exe" --version ;;
+          esac
+
+      - name: Check that stamping keeps an Authenticode signature (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=SimpleRemote CI" -CertStoreLocation Cert:\CurrentUser\My
+          $exe = "$env:RUNNER_TEMP\signed.exe"
+          Copy-Item dist/agents/simpleremote-agent-windows-amd64.exe $exe
+          Set-AuthenticodeSignature -FilePath $exe -Certificate $cert | Out-Null
+          go run ./tools/stamp -in $exe -out "$env:RUNNER_TEMP\signed-stamped.exe"
+          $status = (Get-AuthenticodeSignature "$env:RUNNER_TEMP\signed-stamped.exe").Status
+          Write-Host "Signature status after stamping: $status"
+          # The CI certificate isn't trusted (UnknownError); only a hash mismatch means stamping broke the signature.
+          if ($status -eq 'HashMismatch' -or $status -eq 'NotSigned') { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-${{ matrix.target }}
+          path: dist/agents/simpleremote-agent-*
+          retention-days: 14
+
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc pkg-config libgl1-mesa-dev xorg-dev \
+            libxtst-dev libwayland-dev libxkbcommon-dev wayland-protocols xvfb xdotool libgl1-mesa-dri
+      - name: Build test agent
+        run: go build -tags e2e -o "$RUNNER_TEMP/agent-e2e" ./agent/cmd/simpleremote-agent
+      - name: Run
+        run: |
+          Xvfb :99 -screen 0 1600x900x24 &
+          sleep 1
+          E2E_AGENT_BIN="$RUNNER_TEMP/agent-e2e" DISPLAY=:99 go test -tags e2e -count=1 -v ./server/e2e/
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: false
+          build-args: VERSION=${{ env.VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
