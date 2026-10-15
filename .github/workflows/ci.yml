@@ -141,7 +141,7 @@ jobs:
           # The CI certificate isn't trusted (UnknownError); only a hash mismatch means stamping broke the signature.
           if ($status -eq 'HashMismatch' -or $status -eq 'NotSigned') { exit 1 }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agent-${{ matrix.target }}
           path: dist/agents/simpleremote-agent-*

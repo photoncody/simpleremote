@@ -116,7 +116,7 @@ jobs:
           rm "$zip"
           ditto -c -k --keepParent "$tmp/SimpleRemote.app" "$zip"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agent-${{ matrix.target }}
           path: dist/agents/simpleremote-agent-*
