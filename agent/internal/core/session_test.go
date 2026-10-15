@@ -32,6 +32,7 @@ func (f *fakeUI) Reconnecting()                        {}
 func (f *fakeUI) Chat(string, string)                  {}
 func (f *fakeUI) Activity(string)                      {}
 func (f *fakeUI) ElevationRequested(string)            {}
+func (f *fakeUI) PersistState(bool)                    {}
 func (f *fakeUI) Ended(r string)                       { f.ended <- r }
 
 // A signaling reconnect while the consent prompt is open must not start a

@@ -395,6 +395,11 @@ func (r *room) onTechMessage(p *peer, id auth.Identity, env proto.Envelope) {
 			r.agent.send(rawEnvelope(env))
 			r.m.audit(r.sess.ID, id.Label(), "elevation_requested", "", "")
 		}
+	case proto.TypePersist:
+		var pm proto.Persist
+		if json.Unmarshal(env.Data, &pm) == nil {
+			r.setPersistLocked(pm.On, id.Label())
+		}
 	case proto.TypeEnd:
 		r.endLocked(proto.StateEnded, "ended by tech", id.Label())
 	case proto.TypeEvent:

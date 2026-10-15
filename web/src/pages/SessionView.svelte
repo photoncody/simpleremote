@@ -22,6 +22,8 @@
   let clipSync = $state(false);
   let remoteClip = $state('');
   let elevated = $state(false);
+  let rebootAllowed = $state(false);
+  let persist = $state(false);
   let stats = $state({ fps: 0, kbps: 0 });
   let panel = $state<'' | 'chat' | 'files'>('');
   let chat = $state<{ from: 'tech' | 'user'; text: string; at: Date }[]>([]);
@@ -44,8 +46,14 @@
   $effect(() => {
     if (!canvas) return;
     const r = new RemoteSession(id, canvas, {
-      hello: (h) => (hello = h),
-      status: (s) => (status = s),
+      hello: (h) => {
+        hello = h;
+        rebootAllowed = !!h.reboot_reconnect;
+      },
+      status: (s) => {
+        status = s;
+        persist = !!s.persist;
+      },
       conn: (c) => (conn = c),
       displays: (list, cur) => {
         displays = list;
@@ -161,6 +169,11 @@
           {#each combos as c, i (c.label)}<option value={i}>{c.label}</option>{/each}
         </select>
         <label class="check"><input type="checkbox" bind:checked={clipSync} onchange={() => remote?.setClipboardSync(clipSync)} /> Sync clipboard</label>
+        {#if rebootAllowed}
+          <label class="check" title="Keep this session connected if the computer restarts; ends when you or the user end the session">
+            <input type="checkbox" checked={persist} onchange={(e) => remote?.setPersist(e.currentTarget.checked)} /> Stay connected after restart
+          </label>
+        {/if}
         <button class="small" onclick={pasteClipboard} title="Send your clipboard text to the remote computer">Send clipboard</button>
         <button class="small" class:on={panel === 'files'} onclick={() => togglePanel('files')}>Files</button>
         <button class="small" class:on={panel === 'chat'} onclick={() => togglePanel('chat')}>

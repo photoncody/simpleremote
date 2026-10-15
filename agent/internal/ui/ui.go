@@ -29,13 +29,14 @@ var iconSVG []byte
 
 // Options configure the window.
 type Options struct {
-	ServerURL   string // empty: ask the user
-	Code        string // may be prefilled from the file name
-	ResumeToken string
-	OrgName     string
-	Version     string
-	AutoAllow   bool
-	Session     func(core.Options) *core.Session // for tests; defaults to core.New
+	ServerURL     string // empty: ask the user
+	Code          string // may be prefilled from the file name
+	ResumeToken   string
+	OrgName       string
+	Version       string
+	AutoAllow     bool
+	FromAutostart bool
+	Session       func(core.Options) *core.Session // for tests; defaults to core.New
 }
 
 // App is the agent window.
@@ -51,6 +52,8 @@ type App struct {
 	chatScroll     *container.Scroll
 	activityBox    *fyne.Container
 	activityScroll *container.Scroll
+	persistBanner  *widget.Label
+	persistOn      bool
 }
 
 // Run shows the window and blocks until it closes.
@@ -147,7 +150,7 @@ func (u *App) showSetup() {
 func (u *App) start(server, code string) {
 	u.sess = u.opts.Session(core.Options{
 		ServerURL: server, Code: code, ResumeToken: u.opts.ResumeToken,
-		Version: u.opts.Version, UI: u, AutoAllow: u.opts.AutoAllow,
+		Version: u.opts.Version, UI: u, AutoAllow: u.opts.AutoAllow, FromAutostart: u.opts.FromAutostart,
 	})
 	go u.sess.Run()
 }
@@ -260,16 +263,44 @@ func (u *App) Active(h proto.Hello) {
 		u.activityScroll = container.NewVScroll(u.activityBox)
 		u.activityScroll.SetMinSize(fyne.NewSize(0, 90))
 
+		u.persistBanner = wrapLabel("")
+		u.persistBanner.Importance = widget.WarningImportance
+		u.persistBanner.Hide()
+
 		tabs := container.NewAppTabs(
 			container.NewTabItem("Chat", container.NewBorder(nil, chatRow, nil, nil, u.chatScroll)),
 			container.NewTabItem("Activity", u.activityScroll),
 		)
 		u.setContent("Remote session active", container.NewBorder(
-			container.NewVBox(status, actions, widget.NewSeparator()), nil, nil, nil, tabs))
+			container.NewVBox(status, actions, u.persistBanner, widget.NewSeparator()), nil, nil, nil, tabs))
+		u.applyPersistBanner()
 		u.Activity("Session started.")
 		u.setTray(true)
 		u.a.SendNotification(fyne.NewNotification("Remote session active", h.TechName+" can see and control this computer."))
 	})
+}
+
+// PersistState implements core.UI.
+func (u *App) PersistState(on bool) {
+	fyne.Do(func() {
+		u.persistOn = on
+		u.applyPersistBanner()
+	})
+}
+
+// applyPersistBanner shows or hides the "reconnects after restart" note.
+// Must be called on the UI goroutine.
+func (u *App) applyPersistBanner() {
+	if u.persistBanner == nil {
+		return
+	}
+	if u.persistOn {
+		u.persistBanner.SetText("↻ This computer will reconnect to your technician after a restart, until the session ends. " +
+			"Click End session to stop.")
+		u.persistBanner.Show()
+	} else {
+		u.persistBanner.Hide()
+	}
 }
 
 // Chat implements core.UI.

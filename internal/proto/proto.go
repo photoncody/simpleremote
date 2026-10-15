@@ -38,6 +38,9 @@ const (
 	TypeEnd = "end"
 	// Tech -> agent: ask the user to relaunch the agent as administrator.
 	TypeElevateRequest = "elevate_request"
+	// Tech -> server: turn "stay connected after restart" on or off.
+	// Server -> agent: the server's decision, carrying the expiry bound.
+	TypePersist = "persist"
 	// Either side -> server: record an audit event.
 	TypeEvent = "event"
 	// Server -> client: something went wrong.
@@ -71,6 +74,22 @@ type Hello struct {
 	// Resumed is true when the agent reattached with a resume token and the
 	// user has already consented in this session.
 	Resumed bool `json:"resumed,omitempty"`
+	// RebootReconnect reports whether this server allows "stay connected
+	// after restart"; the tech viewer shows the toggle when it does.
+	RebootReconnect bool `json:"reboot_reconnect,omitempty"`
+	// Persist (to the agent) reports the current reboot-reconnect state so a
+	// resumed agent re-arms with a fresh expiry. PersistUntil is a Unix time.
+	Persist      bool  `json:"persist,omitempty"`
+	PersistUntil int64 `json:"persist_until,omitempty"`
+}
+
+// Persist is sent by the tech to turn reboot reconnect on or off, and by the
+// server to the agent with its decision.
+type Persist struct {
+	On bool `json:"on"`
+	// Until is set by the server: the Unix time after which a persisted agent
+	// must give up and remove its autostart.
+	Until int64 `json:"until,omitempty"`
 }
 
 // AgentInfo describes the end user's computer.
@@ -103,6 +122,9 @@ type Status struct {
 	AgentConnected bool       `json:"agent_connected"`
 	Agent          *AgentInfo `json:"agent,omitempty"`
 	EndReason      string     `json:"end_reason,omitempty"`
+	// Persist reflects the reboot-reconnect state so the tech viewer can show
+	// the toggle's current position.
+	Persist bool `json:"persist"`
 }
 
 // SDP carries an offer or answer.

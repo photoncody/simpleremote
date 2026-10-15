@@ -169,6 +169,16 @@ export class RemoteSession {
     this.signal('elevate_request', {});
   }
 
+  // Turn "stay connected after restart" on or off for this session.
+  setPersist(on: boolean) {
+    this.signal('persist', { on });
+  }
+
+  // Whether this server allows reboot reconnect (from the hello).
+  rebootReconnect(): boolean {
+    return !!this.hello?.reboot_reconnect;
+  }
+
   private onSignal(env: Envelope) {
     switch (env.type) {
       case 'hello':

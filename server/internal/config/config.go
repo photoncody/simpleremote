@@ -33,6 +33,12 @@ type Config struct {
 	SessionMaxDuration time.Duration
 	AuditRetentionDays int
 
+	// RebootReconnect allows a tech to keep a live session connected across a
+	// restart of the user's computer. RebootGrace is how long the server
+	// holds the session open while the agent is gone during a restart.
+	RebootReconnect bool
+	RebootGrace     time.Duration
+
 	OIDC  OIDC
 	Admin Admin
 	ICE   ICE
@@ -93,6 +99,8 @@ func load(getenv func(string) string) (*Config, error) {
 		CodeTTL:            e.duration("CODE_TTL", 10*time.Minute),
 		SessionMaxDuration: e.duration("SESSION_MAX_DURATION", 4*time.Hour),
 		AuditRetentionDays: e.int("AUDIT_RETENTION_DAYS", 365),
+		RebootReconnect:    e.bool("REBOOT_RECONNECT", true),
+		RebootGrace:        e.duration("REBOOT_GRACE", 10*time.Minute),
 	}
 
 	if raw := e.str("PUBLIC_URL", ""); raw == "" {
@@ -147,6 +155,12 @@ func load(getenv func(string) string) (*Config, error) {
 	}
 	if c.SessionMaxDuration < 5*time.Minute {
 		e.fail("SESSION_MAX_DURATION must be at least 5m")
+	}
+	if c.RebootGrace < time.Minute {
+		e.fail("REBOOT_GRACE must be at least 1m")
+	}
+	if c.RebootGrace > c.SessionMaxDuration {
+		c.RebootGrace = c.SessionMaxDuration
 	}
 	if c.TechSessionTTL < 5*time.Minute {
 		e.fail("TECH_SESSION_TTL must be at least 5m")

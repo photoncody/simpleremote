@@ -17,6 +17,7 @@ export interface Hello {
   tech_name: string;
   tech_email?: string;
   ice_servers: ICEServer[];
+  reboot_reconnect?: boolean;
 }
 
 export interface AgentInfo {
@@ -35,6 +36,7 @@ export interface Status {
   agent_connected: boolean;
   agent?: AgentInfo;
   end_reason?: string;
+  persist?: boolean;
 }
 
 export interface Display {

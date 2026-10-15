@@ -79,6 +79,10 @@ type room struct {
 	tokenAcked bool
 	consented  bool
 	ended      bool
+	// persistent is set while the tech has "stay connected after restart" on.
+	// The agent then survives a reboot, so the server holds the session open
+	// for RebootGrace (instead of AgentGrace) while the agent is away.
+	persistent bool
 
 	tech        *peer
 	agent       *peer
@@ -268,27 +272,72 @@ func (r *room) broadcastStatusLocked() {
 	}
 	msg, _ := proto.Marshal(proto.TypeStatus, proto.Status{
 		State: r.sess.State, AgentConnected: r.agent != nil, Agent: r.agentInfo, EndReason: r.sess.EndReason,
+		Persist: r.persistent,
 	})
 	r.tech.send(msg)
+}
+
+// persistUntil is the latest time a persisted agent may keep trying to
+// reconnect: the session's hard end, which is also when the server gives up.
+func (r *room) persistUntil() time.Time {
+	return r.sess.CreatedAt.Add(r.m.cfg.SessionMaxDuration)
 }
 
 func (r *room) helloLocked(forAgent bool) []byte {
 	h := proto.Hello{
 		SessionID: r.sess.ID, OrgName: r.m.cfg.OrgName, TechName: r.sess.TechName, TechEmail: r.sess.TechEmail,
-		ICEServers: turn.Servers(r.m.cfg.ICE, r.sess.ID, r.m.now()),
+		ICEServers:      turn.Servers(r.m.cfg.ICE, r.sess.ID, r.m.now()),
+		RebootReconnect: r.m.cfg.RebootReconnect,
 	}
 	if forAgent {
 		h.ResumeToken = r.resumeToken
 		h.Resumed = r.consented
+		// So a resumed agent re-arms autostart with a fresh expiry.
+		h.Persist = r.persistent
+		if r.persistent {
+			h.PersistUntil = r.persistUntil().Unix()
+		}
 	}
 	msg, _ := proto.Marshal(proto.TypeHello, h)
 	return msg
+}
+
+// setPersistLocked turns reboot reconnect on or off and tells the agent.
+// r.mu must be held.
+func (r *room) setPersistLocked(on bool, techLabel string) {
+	if !r.m.cfg.RebootReconnect || r.persistent == on || r.sess.State != proto.StateActive {
+		return
+	}
+	r.persistent = on
+	kind := "reboot_reconnect_disarmed"
+	if on {
+		kind = "reboot_reconnect_armed"
+	}
+	r.m.audit(r.sess.ID, techLabel, kind, "", "")
+	if r.agent != nil {
+		p := proto.Persist{On: on}
+		if on {
+			p.Until = r.persistUntil().Unix()
+		}
+		msg, _ := proto.Marshal(proto.TypePersist, p)
+		r.agent.send(msg)
+	}
+	r.broadcastStatusLocked()
 }
 
 func (m *Manager) audit(sessionID, actor, kind, detail, ip string) {
 	if err := m.store.AddEvent(context.Background(), store.Event{SessionID: sessionID, Actor: actor, Kind: kind, Detail: detail, IP: ip}); err != nil {
 		m.log.Error("audit", "err", err)
 	}
+}
+
+// agentGrace is how long the session stays open while the agent is gone:
+// long enough to survive a restart when reboot reconnect is on. r.mu held.
+func (r *room) agentGrace() time.Duration {
+	if r.persistent {
+		return r.m.cfg.RebootGrace
+	}
+	return AgentGrace
 }
 
 // Reap expires unused codes, enforces the maximum session length, and ends
@@ -308,8 +357,12 @@ func (m *Manager) Reap() {
 			r.endLocked(proto.StateExpired, "code expired before use", "system")
 		case now.Sub(r.sess.CreatedAt) > m.cfg.SessionMaxDuration:
 			r.endLocked(proto.StateEnded, "maximum session length reached", "system")
-		case r.sess.State != proto.StatePending && r.agent == nil && !r.agentLostAt.IsZero() && now.Sub(r.agentLostAt) > AgentGrace:
-			r.endLocked(proto.StateEnded, "agent disconnected", "system")
+		case r.sess.State != proto.StatePending && r.agent == nil && !r.agentLostAt.IsZero() && now.Sub(r.agentLostAt) > r.agentGrace():
+			reason := "agent disconnected"
+			if r.persistent {
+				reason = "the computer did not reconnect after restarting"
+			}
+			r.endLocked(proto.StateEnded, reason, "system")
 		case r.sess.State == proto.StateActive && r.tech == nil && !r.techLostAt.IsZero() && now.Sub(r.techLostAt) > TechGrace:
 			r.endLocked(proto.StateEnded, "tech disconnected", "system")
 		}

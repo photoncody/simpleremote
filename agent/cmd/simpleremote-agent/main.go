@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/photoncody/simpleremote/agent/internal/persist"
 	"github.com/photoncody/simpleremote/agent/internal/platform"
 	"github.com/photoncody/simpleremote/agent/internal/ui"
 	"github.com/photoncody/simpleremote/internal/stamp"
@@ -32,6 +33,7 @@ func main() {
 	code := flag.String("code", "", "session code (normally read from the downloaded file)")
 	resume := flag.String("resume", "", "internal: resume token when relaunching as administrator")
 	org := flag.String("org", "", "internal: organization name")
+	fromAutostart := flag.Bool("from-autostart", false, "internal: resume a session after the computer restarted")
 	logPath := flag.String("log", "", "write a debug log to this file")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
@@ -54,6 +56,22 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(logOut, &slog.HandlerOptions{Level: level})))
 
 	platform.Init()
+
+	// Relaunched by the per-user autostart after a restart: rejoin the saved
+	// session, or clean up and exit if it can no longer be resumed.
+	if *fromAutostart {
+		info, ok := persist.Load()
+		if !ok || info.Expired() {
+			slog.Info("autostart: no resumable session", "found", ok)
+			persist.Disarm()
+			return
+		}
+		ui.Run(ui.Options{
+			ServerURL: info.ServerURL, ResumeToken: info.ResumeToken, OrgName: info.OrgName,
+			Version: version, FromAutostart: true,
+		})
+		return
+	}
 
 	opts := ui.Options{
 		ServerURL: *server, Code: stamp.NormalizeCode(*code), ResumeToken: *resume, OrgName: *org,

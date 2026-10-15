@@ -17,6 +17,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/photoncody/simpleremote/agent/internal/persist"
 	"github.com/photoncody/simpleremote/agent/internal/platform"
 	"github.com/photoncody/simpleremote/internal/proto"
 )
@@ -37,6 +38,9 @@ type UI interface {
 	Activity(text string)
 	// ElevationRequested asks the user whether to relaunch as administrator.
 	ElevationRequested(techName string)
+	// PersistState reports whether "stay connected after restart" is on, so
+	// the window can show it.
+	PersistState(on bool)
 	Ended(reason string)
 }
 
@@ -50,6 +54,10 @@ type Options struct {
 	Log         *slog.Logger
 	// AutoAllow skips the consent prompt. Only end-to-end test builds set it.
 	AutoAllow bool
+	// FromAutostart is set when the agent was relaunched after a restart to
+	// resume a persisted session. A fatal failure then removes the autostart
+	// and exits instead of showing the manual connect form.
+	FromAutostart bool
 }
 
 // Session is one connection to the server.
@@ -74,6 +82,8 @@ type Session struct {
 	// pendingICE holds candidates that arrive before the peer connection
 	// has the tech's offer installed.
 	pendingICE []proto.ICECandidate
+	// persistent mirrors the server's reboot-reconnect state.
+	persistent bool
 
 	consentCh chan bool
 }
@@ -271,6 +281,8 @@ func (s *Session) onSignal(env proto.Envelope) error {
 		}
 		if alreadyConsented {
 			s.opts.UI.Active(h)
+			// Re-arm with a fresh expiry when resuming a persisted session.
+			s.applyPersist(h.Persist, time.Unix(h.PersistUntil, 0))
 			if p := platform.CheckPermissions(); !p.OK() {
 				s.opts.UI.NeedPermissions(p)
 			}
@@ -313,6 +325,12 @@ func (s *Session) onSignal(env proto.Envelope) error {
 	case proto.TypeElevateRequest:
 		if platform.CanElevate() {
 			s.opts.UI.ElevationRequested(s.Hello().TechName)
+		}
+
+	case proto.TypePersist:
+		var pm proto.Persist
+		if json.Unmarshal(env.Data, &pm) == nil {
+			s.applyPersist(pm.On, time.Unix(pm.Until, 0))
 		}
 
 	case proto.TypeEnd:
@@ -366,6 +384,42 @@ func (s *Session) awaitConsent(h proto.Hello) {
 	if p := platform.CheckPermissions(); !p.OK() {
 		platform.RequestPermissions()
 		s.opts.UI.NeedPermissions(p)
+	}
+}
+
+// applyPersist arms or removes reboot reconnect to match the server. When on,
+// it writes the resume file and installs the per-user autostart so the agent
+// rejoins this session after the computer restarts.
+func (s *Session) applyPersist(on bool, until time.Time) {
+	s.mu.Lock()
+	if s.persistent == on && !on {
+		s.mu.Unlock()
+		return
+	}
+	s.persistent = on
+	token, server, org := s.resumeToken, s.opts.ServerURL, s.hello.OrgName
+	s.mu.Unlock()
+
+	if on {
+		if until.IsZero() || until.Before(time.Now()) {
+			until = time.Now().Add(10 * time.Minute)
+		}
+		err := persist.Arm(persist.Info{ServerURL: server, ResumeToken: token, OrgName: org, Expires: until})
+		if err != nil {
+			s.log.Warn("arm reboot reconnect", "err", err)
+			s.notifyTech("Could not enable reconnect-after-restart on this computer: " + err.Error())
+			s.mu.Lock()
+			s.persistent = false
+			s.mu.Unlock()
+			s.opts.UI.PersistState(false)
+			return
+		}
+		s.opts.UI.PersistState(true)
+		s.opts.UI.Activity("This computer will reconnect to your technician after a restart, until the session ends.")
+	} else {
+		persist.Disarm()
+		s.opts.UI.PersistState(false)
+		s.opts.UI.Activity("Reconnect-after-restart turned off.")
 	}
 }
 
@@ -472,6 +526,10 @@ func (s *Session) finish(reason string, byUser bool) {
 	s.ended = true
 	ws := s.ws
 	s.mu.Unlock()
+	// The session is over, so remove any reboot-reconnect autostart. This is
+	// a no-op when nothing was armed, and is skipped on a handoff (which sets
+	// s.handoff and never reaches finish).
+	persist.Disarm()
 	if ws != nil {
 		ws.Close(websocket.StatusNormalClosure, "")
 	}
