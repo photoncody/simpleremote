@@ -8,6 +8,23 @@ import (
 	"time"
 )
 
+func TestQuoteDesktopExec(t *testing.T) {
+	cases := map[string]string{
+		"/tmp/SimpleRemote-123456":   `"/tmp/SimpleRemote-123456"`,
+		"/home/a b/SimpleRemote (1)": `"/home/a b/SimpleRemote (1)"`,
+		`/tmp/$HOME`:                 `"/tmp/\\$HOME"`,
+		"/tmp/`id`":                  "\"/tmp/\\\\`id\\\\`\"",
+		`/tmp/50%`:                   `"/tmp/50%%"`,
+		`/tmp/q"x`:                   `"/tmp/q\\"x"`,
+		`/tmp/back\slash`:            `"/tmp/back\\\\slash"`,
+	}
+	for in, want := range cases {
+		if got := quote(in); got != want {
+			t.Errorf("quote(%q) = %s, want %s", in, got, want)
+		}
+	}
+}
+
 // Arm installs an XDG autostart entry, and Disarm removes it.
 func TestLinuxAutostartFile(t *testing.T) {
 	isolate(t)

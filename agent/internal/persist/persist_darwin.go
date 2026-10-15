@@ -48,11 +48,10 @@ func enableAutostart(exe string) error {
 	// Run once at login, not kept alive: this is a one-shot reconnect.
 	b.WriteString("<key>RunAtLoad</key><true/>\n")
 	b.WriteString("</dict></plist>\n")
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
-		return err
-	}
-	_ = exec.Command("launchctl", "load", "-w", path).Run()
-	return nil
+	// Only write the file: launchd loads ~/Library/LaunchAgents at the next
+	// login. Loading it now would run it immediately (RunAtLoad), starting a
+	// second agent that fights this one for the session.
+	return os.WriteFile(path, []byte(b.String()), 0o600)
 }
 
 func disableAutostart() {
@@ -60,8 +59,11 @@ func disableAutostart() {
 	if err != nil {
 		return
 	}
-	_ = exec.Command("launchctl", "unload", "-w", path).Run()
+	// Delete the file first so nothing relaunches at the next login, then
+	// drop the job if launchd loaded it at this login. For the app bundle the
+	// job is `/usr/bin/open`, which has already exited, so this stops nothing.
 	os.Remove(path)
+	_ = exec.Command("launchctl", "remove", launchLabel).Run()
 }
 
 func xmlEscape(s string) string {

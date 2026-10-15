@@ -26,6 +26,9 @@ type Info struct {
 	ResumeToken string    `json:"resume_token"`
 	OrgName     string    `json:"org_name"`
 	Expires     time.Time `json:"expires"`
+	// Owner is the account of the user who allowed the session. The
+	// relaunched agent only rejoins when it runs as that same user.
+	Owner string `json:"owner"`
 }
 
 // Expired reports whether the resume window has passed.
@@ -84,10 +87,21 @@ func Arm(info Info) error {
 // Disarm removes the autostart entry and the resume file. It is safe to call
 // when nothing is armed.
 func Disarm() {
-	disableAutostart()
+	// Remove the resume file first: without it a relaunched agent exits, even
+	// if removing the autostart entry fails or is interrupted.
 	if path, err := filePath(); err == nil {
 		os.Remove(path)
 	}
+	disableAutostart()
+}
+
+// DisarmFor removes reboot reconnect if it belongs to the session with this
+// resume token (or is orphaned), leaving another session's arrangement alone.
+func DisarmFor(token string) {
+	if info, ok := Load(); ok && token != "" && info.ResumeToken != token {
+		return
+	}
+	Disarm()
 }
 
 // Load reads the resume file written by Arm.

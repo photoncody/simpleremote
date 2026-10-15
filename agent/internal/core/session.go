@@ -55,9 +55,13 @@ type Options struct {
 	// AutoAllow skips the consent prompt. Only end-to-end test builds set it.
 	AutoAllow bool
 	// FromAutostart is set when the agent was relaunched after a restart to
-	// resume a persisted session. A fatal failure then removes the autostart
-	// and exits instead of showing the manual connect form.
+	// resume a persisted session. The network is often not up yet at login,
+	// so the first connection is retried rather than failing immediately.
 	FromAutostart bool
+	// Owner is the account of the user who allowed the session; it defaults
+	// to the current user. Reboot reconnect is only set up while the agent
+	// runs as that user, so it can never start in someone else's login.
+	Owner string
 }
 
 // Session is one connection to the server.
@@ -93,6 +97,9 @@ func New(opts Options) *Session {
 	if opts.Log == nil {
 		opts.Log = slog.Default()
 	}
+	if opts.Owner == "" {
+		opts.Owner = platform.Username()
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Session{opts: opts, log: opts.Log, ctx: ctx, cancel: cancel,
 		resumeToken: opts.ResumeToken, consentCh: make(chan bool, 1)}
@@ -126,7 +133,14 @@ func wsURL(server string) (string, error) {
 func (s *Session) Run() {
 	defer s.cleanup()
 	s.opts.UI.Connecting(s.opts.ServerURL)
-	err := s.connect(true)
+	var err error
+	if s.opts.FromAutostart {
+		// Just logged in after a restart: the network is often not ready yet,
+		// so keep trying instead of treating the first failure as final.
+		err = s.retryConnect(persistedReconnectWindow)
+	} else {
+		err = s.connect(true)
+	}
 	for err == nil || errors.Is(err, errDisconnected) {
 		if s.isEnded() {
 			return
@@ -144,8 +158,28 @@ func (s *Session) Run() {
 
 var errDisconnected = errors.New("disconnected from server")
 
+// How long the agent keeps trying to reach the server. A session with reboot
+// reconnect on is held open by the server for REBOOT_GRACE, so its agent
+// keeps trying for longer before giving up.
+const (
+	reconnectWindow          = 50 * time.Second
+	persistedReconnectWindow = 5 * time.Minute
+)
+
 func (s *Session) reconnect() error {
-	deadline := time.Now().Add(50 * time.Second)
+	s.mu.Lock()
+	window := reconnectWindow
+	if s.persistent {
+		window = persistedReconnectWindow
+	}
+	s.mu.Unlock()
+	return s.retryConnect(window)
+}
+
+// retryConnect dials with backoff for up to window, stopping early when the
+// server reports something final, such as the session having ended.
+func (s *Session) retryConnect(window time.Duration) error {
+	deadline := time.Now().Add(window)
 	delay := time.Second
 	for time.Now().Before(deadline) {
 		select {
@@ -392,34 +426,65 @@ func (s *Session) awaitConsent(h proto.Hello) {
 // rejoins this session after the computer restarts.
 func (s *Session) applyPersist(on bool, until time.Time) {
 	s.mu.Lock()
-	if s.persistent == on && !on {
-		s.mu.Unlock()
-		return
-	}
+	was := s.persistent
 	s.persistent = on
+	consented := s.consented
 	token, server, org := s.resumeToken, s.opts.ServerURL, s.hello.OrgName
 	s.mu.Unlock()
 
-	if on {
-		if until.IsZero() || until.Before(time.Now()) {
-			until = time.Now().Add(10 * time.Minute)
-		}
-		err := persist.Arm(persist.Info{ServerURL: server, ResumeToken: token, OrgName: org, Expires: until})
-		if err != nil {
-			s.log.Warn("arm reboot reconnect", "err", err)
-			s.notifyTech("Could not enable reconnect-after-restart on this computer: " + err.Error())
-			s.mu.Lock()
-			s.persistent = false
-			s.mu.Unlock()
-			s.opts.UI.PersistState(false)
-			return
-		}
-		s.opts.UI.PersistState(true)
-		s.opts.UI.Activity("This computer will reconnect to your technician after a restart, until the session ends.")
-	} else {
-		persist.Disarm()
+	if !on {
+		// Always clear it, even when this process never set it up: after a
+		// restart the arrangement was made by the previous process, and the
+		// tech may have turned it off while the computer was rebooting.
+		persist.DisarmFor(token)
 		s.opts.UI.PersistState(false)
-		s.opts.UI.Activity("Reconnect-after-restart turned off.")
+		if was {
+			s.opts.UI.Activity("Reconnect-after-restart turned off.")
+		}
+		return
+	}
+
+	// Only ever set this up for the user who allowed the session, and only
+	// once they have allowed it.
+	if user := platform.Username(); user != s.opts.Owner {
+		s.refusePersist(fmt.Sprintf("it is running as %s, but %s allowed the session", user, s.opts.Owner))
+		return
+	}
+	if !consented {
+		s.refusePersist("the user has not allowed the session yet")
+		return
+	}
+	if until.IsZero() || until.Before(time.Now()) {
+		until = time.Now().Add(10 * time.Minute)
+	}
+	err := persist.Arm(persist.Info{
+		ServerURL: server, ResumeToken: token, OrgName: org, Expires: until, Owner: s.opts.Owner,
+	})
+	if err != nil {
+		s.log.Warn("set up reboot reconnect", "err", err)
+		s.refusePersist(err.Error())
+		return
+	}
+	s.opts.UI.PersistState(true)
+	if !was {
+		s.opts.UI.Activity("This computer will reconnect to your technician after a restart, until the session ends.")
+	}
+}
+
+// refusePersist reports back that reboot reconnect is not in place, so the
+// server and the tech's toggle match what is really on this computer.
+func (s *Session) refusePersist(why string) {
+	s.mu.Lock()
+	s.persistent = false
+	token := s.resumeToken
+	s.mu.Unlock()
+	persist.DisarmFor(token)
+	s.opts.UI.PersistState(false)
+	s.notifyTech("This computer will not reconnect after a restart: " + why + ".")
+	// Tell the server, so it stops holding the session open for a restart
+	// that will never come and the toggle goes back to off.
+	if err := s.send(proto.TypePersist, proto.Persist{On: false}); err != nil {
+		s.log.Warn("report reboot reconnect off", "err", err)
 	}
 }
 
@@ -486,7 +551,11 @@ func (s *Session) handoffTo(relaunch func([]string) error, auditKind string) err
 	if token == "" || !consented {
 		return errors.New("not connected")
 	}
-	if err := relaunch([]string{"--server", server, "--resume", token, "--org", org}); err != nil {
+	// Pass the consenting user through: the new process may run as a
+	// different account (an elevated relaunch can), and it must not set up
+	// reboot reconnect in that account's login.
+	args := []string{"--server", server, "--resume", token, "--org", org, "--owner", s.opts.Owner}
+	if err := relaunch(args); err != nil {
 		return err
 	}
 	s.audit(auditKind, "")
@@ -525,11 +594,12 @@ func (s *Session) finish(reason string, byUser bool) {
 	}
 	s.ended = true
 	ws := s.ws
+	token := s.resumeToken
 	s.mu.Unlock()
-	// The session is over, so remove any reboot-reconnect autostart. This is
-	// a no-op when nothing was armed, and is skipped on a handoff (which sets
-	// s.handoff and never reaches finish).
-	persist.Disarm()
+	// The session is over, so clear its reboot-reconnect arrangement. This is
+	// a no-op when nothing was set up, and is skipped on a handoff (which
+	// sets s.handoff and never reaches finish).
+	persist.DisarmFor(token)
 	if ws != nil {
 		ws.Close(websocket.StatusNormalClosure, "")
 	}

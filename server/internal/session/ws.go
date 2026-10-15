@@ -299,6 +299,15 @@ func (r *room) onAgentMessage(p *peer, env proto.Envelope) {
 			r.tech.send(rawEnvelope(env))
 		}
 
+	case proto.TypePersist:
+		// The agent reports it could not keep reconnect-after-restart in
+		// place, so stop holding the session open for a restart that will
+		// never come and put the tech's toggle back to off.
+		var pm proto.Persist
+		if json.Unmarshal(env.Data, &pm) == nil && !pm.On {
+			r.setPersistLocked(false, "end user")
+		}
+
 	case proto.TypeEnd:
 		r.endLocked(proto.StateEnded, "ended by the user", "end user")
 

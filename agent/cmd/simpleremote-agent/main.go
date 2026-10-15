@@ -33,6 +33,7 @@ func main() {
 	code := flag.String("code", "", "session code (normally read from the downloaded file)")
 	resume := flag.String("resume", "", "internal: resume token when relaunching as administrator")
 	org := flag.String("org", "", "internal: organization name")
+	owner := flag.String("owner", "", "internal: the account of the user who allowed the session")
 	fromAutostart := flag.Bool("from-autostart", false, "internal: resume a session after the computer restarted")
 	logPath := flag.String("log", "", "write a debug log to this file")
 	showVersion := flag.Bool("version", false, "print the version and exit")
@@ -61,21 +62,27 @@ func main() {
 	// session, or clean up and exit if it can no longer be resumed.
 	if *fromAutostart {
 		info, ok := persist.Load()
-		if !ok || info.Expired() {
+		switch {
+		case !ok || info.Expired():
 			slog.Info("autostart: no resumable session", "found", ok)
+			persist.Disarm()
+			return
+		case info.Owner != "" && info.Owner != platform.Username():
+			// Only the user who allowed the session resumes it.
+			slog.Info("autostart: session belongs to another user", "owner", info.Owner)
 			persist.Disarm()
 			return
 		}
 		ui.Run(ui.Options{
 			ServerURL: info.ServerURL, ResumeToken: info.ResumeToken, OrgName: info.OrgName,
-			Version: version, FromAutostart: true,
+			Owner: info.Owner, Version: version, FromAutostart: true,
 		})
 		return
 	}
 
 	opts := ui.Options{
 		ServerURL: *server, Code: stamp.NormalizeCode(*code), ResumeToken: *resume, OrgName: *org,
-		Version: version, AutoAllow: autoAllow(),
+		Owner: *owner, Version: version, AutoAllow: autoAllow(),
 	}
 	if opts.ServerURL == "" && opts.ResumeToken == "" {
 		if st, path, err := readStamp(); err == nil {

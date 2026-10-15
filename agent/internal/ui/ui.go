@@ -33,6 +33,7 @@ type Options struct {
 	Code          string // may be prefilled from the file name
 	ResumeToken   string
 	OrgName       string
+	Owner         string // the account of the user who allowed the session
 	Version       string
 	AutoAllow     bool
 	FromAutostart bool
@@ -149,7 +150,7 @@ func (u *App) showSetup() {
 
 func (u *App) start(server, code string) {
 	u.sess = u.opts.Session(core.Options{
-		ServerURL: server, Code: code, ResumeToken: u.opts.ResumeToken,
+		ServerURL: server, Code: code, ResumeToken: u.opts.ResumeToken, Owner: u.opts.Owner,
 		Version: u.opts.Version, UI: u, AutoAllow: u.opts.AutoAllow, FromAutostart: u.opts.FromAutostart,
 	})
 	go u.sess.Run()

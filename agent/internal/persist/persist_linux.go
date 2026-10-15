@@ -45,9 +45,13 @@ func disableAutostart() {
 	}
 }
 
-// quote wraps a path in double quotes for the .desktop Exec line, escaping
-// backslashes and quotes as the spec requires.
+// quote encodes a path as one quoted argument of a .desktop Exec line,
+// following the Desktop Entry spec: inside double quotes, `"`, "`", `$` and
+// `\` are backslash-escaped; then the value-level escape doubles every
+// backslash; and `%` is doubled so it isn't read as a field code.
 func quote(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
-	return `"` + r.Replace(s) + `"`
+	inner := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`", `$`, `\$`).Replace(s)
+	inner = strings.ReplaceAll(inner, `\`, `\\`)
+	inner = strings.ReplaceAll(inner, `%`, `%%`)
+	return `"` + inner + `"`
 }
