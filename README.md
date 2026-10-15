@@ -31,7 +31,7 @@ The server only relays signaling, and nothing reaches the agent's WebRTC stack u
 
 SimpleRemote is for helping people who asked for help. The design reflects that:
 
-- The agent runs only when the user starts it. It doesn't install a service, add itself to startup, or stay running after the session ends.
+- The agent runs only when the user starts it. It doesn't install a service or stay running after the session ends. "Stay connected after restart" (off unless the tech turns it on) adds only a per-user autostart that rejoins the same session once after a reboot and is removed when the session ends; it never survives the session.
 - The user sees the technician's name, email, and organization, plus a warning about unexpected callers, and must click **Allow** before anything is shared. Unanswered prompts are declined after 5 minutes.
 - The agent window stays open with an **End session** button for the whole session, and closing it ends the session.
 - Codes are single-use, short-lived, and rate-limited against guessing.
@@ -104,6 +104,8 @@ Everything is an environment variable. Each one can also be read from a file wit
 | `TURN_CRED_TTL` | max duration + 15m | Lifetime of TURN credentials. |
 | `CODE_TTL` | `10m` | How long a new code stays valid. |
 | `SESSION_MAX_DURATION` | `4h` | Hard limit on a session's length. |
+| `REBOOT_RECONNECT` | `true` | Allow "stay connected after restart": the agent rejoins the same session after the user's computer reboots. |
+| `REBOOT_GRACE` | `10m` | How long the server holds a session open while the computer restarts. |
 | `TECH_SESSION_TTL` | `12h` | How long a tech stays signed in. |
 | `AUDIT_RETENTION_DAYS` | `365` | Days of audit history to keep (`0` keeps it forever). |
 | `TRUSTED_PROXIES` | | IPs/CIDRs whose `X-Forwarded-For` is trusted. |
