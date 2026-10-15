@@ -191,11 +191,9 @@ func (m *Manager) attachAgent(p *peer, join proto.Join, ip string) (*room, error
 		rm = m.byToken[join.ResumeToken]
 		resumed = true
 	case join.Code != "":
+		// The code is retired once the agent acknowledges its resume token
+		// (see ackTokenLocked); until then only one agent can hold it.
 		rm = m.byCode[join.Code]
-		if rm != nil {
-			// The code is single-use: consume it now.
-			delete(m.byCode, join.Code)
-		}
 	}
 	m.mu.Unlock()
 	if rm == nil {
@@ -208,10 +206,8 @@ func (m *Manager) attachAgent(p *peer, join proto.Join, ip string) (*room, error
 		return nil, ErrCodeUsed
 	}
 	now := m.now()
-	if !resumed {
-		if rm.sess.State != proto.StatePending || now.After(rm.sess.CodeExpiresAt) {
-			return nil, ErrCodeUsed
-		}
+	switch {
+	case !resumed && rm.sess.State == proto.StatePending && !now.After(rm.sess.CodeExpiresAt):
 		rm.sess.State = proto.StateAwaitingConsent
 		rm.sess.ConnectedAt = now
 		rm.sess.AgentIP = ip
@@ -221,7 +217,15 @@ func (m *Manager) attachAgent(p *peer, join proto.Join, ip string) (*room, error
 		m.mu.Unlock()
 		rm.saveLocked()
 		m.audit(rm.sess.ID, "end user", "agent_connected", "", ip)
-	} else {
+	case !resumed:
+		// The first connection dropped before the agent got its resume
+		// token: let it rejoin with the code, but never alongside a
+		// connected agent.
+		if rm.tokenAcked || rm.agent != nil || rm.sess.State != proto.StateAwaitingConsent || now.After(rm.sess.CodeExpiresAt) {
+			return nil, ErrCodeUsed
+		}
+		m.audit(rm.sess.ID, "end user", "agent_reconnected", "", ip)
+	default:
 		if rm.agent != nil {
 			rm.agent.closeAfterFlush()
 		}
@@ -234,6 +238,20 @@ func (m *Manager) attachAgent(p *peer, join proto.Join, ip string) (*room, error
 	return rm, nil
 }
 
+// ackTokenLocked retires the code once the agent has its resume token.
+// r.mu must be held.
+func (r *room) ackTokenLocked() {
+	if r.tokenAcked {
+		return
+	}
+	r.tokenAcked = true
+	r.m.mu.Lock()
+	if r.m.byCode[r.sess.Code] == r {
+		delete(r.m.byCode, r.sess.Code)
+	}
+	r.m.mu.Unlock()
+}
+
 var eventKindRE = regexp.MustCompile(`^[a-z_]{1,40}$`)
 
 func (r *room) onAgentMessage(p *peer, env proto.Envelope) {
@@ -242,6 +260,9 @@ func (r *room) onAgentMessage(p *peer, env proto.Envelope) {
 	if r.ended || r.agent != p {
 		return
 	}
+	// The agent only sends after reading the hello, so it now holds its
+	// resume token and the code can be retired.
+	r.ackTokenLocked()
 	switch env.Type {
 	case proto.TypeAgentInfo:
 		var info proto.AgentInfo

@@ -51,6 +51,24 @@ export interface RemoteEvents {
 
 const CHUNK = 64 * 1024;
 const HIGH_WATER = 1 << 20;
+// Downloads are kept in memory only where the browser can't stream them to
+// disk; above this size they are refused instead of exhausting the tab.
+export const MAX_MEMORY_DOWNLOAD = 512 * 1024 * 1024;
+
+// The File System Access API (Chromium) lets downloads stream to disk.
+interface WritableFile {
+  write(data: Uint8Array): Promise<void>;
+  close(): Promise<void>;
+  abort(): Promise<void>;
+}
+type SavePicker = (opts: { suggestedName: string }) => Promise<{ createWritable(): Promise<WritableFile> }>;
+
+interface Download {
+  t: Transfer;
+  parts: Uint8Array[];
+  file: WritableFile | null;
+  writes: Promise<void>;
+}
 
 export class RemoteSession {
   private ws: WebSocket | null = null;
@@ -67,10 +85,13 @@ export class RemoteSession {
   private pendingMove: { x: number; y: number } | null = null;
   private moveScheduled = false;
   private nextFileId = 1;
-  private downloads = new Map<number, { t: Transfer; parts: Uint8Array[] }>();
+  private downloads = new Map<number, Download>();
   private uploads = new Map<number, Transfer>();
   private closed = false;
   private wsRetry = 0;
+  // Set when the signaling socket reconnects, so an unfinished WebRTC
+  // negotiation (whose messages may have been lost) is restarted.
+  private resync = false;
   private frames = 0;
   private bytes = 0;
   private statsTimer = 0;
@@ -119,7 +140,10 @@ export class RemoteSession {
     const ws = new WebSocket(`${proto}//${location.host}/ws/tech/${encodeURIComponent(this.sessionId)}`);
     this.ws = ws;
     this.on.conn?.('signaling');
-    ws.onopen = () => (this.wsRetry = 0);
+    ws.onopen = () => {
+      if (this.wsRetry > 0) this.resync = true;
+      this.wsRetry = 0;
+    };
     ws.onmessage = (e) => this.onSignal(JSON.parse(e.data) as Envelope);
     ws.onclose = () => {
       if (this.closed) return;
@@ -164,9 +188,14 @@ export class RemoteSession {
           } else {
             this.on.conn?.('waiting');
           }
-        } else if (!this.pc || (prev && !prev.agent_connected)) {
+        } else if (
+          !this.pc ||
+          (prev && !prev.agent_connected) ||
+          (this.resync && this.pc.connectionState !== 'connected')
+        ) {
           this.startRTC();
         }
+        this.resync = false;
         break;
       }
       case 'answer': {
@@ -525,13 +554,41 @@ export class RemoteSession {
     this.audit('file_sent', `${file.name} (${file.size} bytes)`);
   }
 
-  download(path: string) {
+  // Call from a click handler: on Chromium it opens a save dialog and
+  // streams the file to disk; elsewhere the file is buffered in memory, up
+  // to MAX_MEMORY_DOWNLOAD.
+  async download(path: string, size: number) {
     const id = this.nextFileId++;
     const name = path.split(/[\\/]/).pop() || 'download';
-    const t: Transfer = { id, name, direction: 'down', size: 0, done: 0, state: 'active' };
-    this.downloads.set(id, { t, parts: [] });
+    const t: Transfer = { id, name, direction: 'down', size, done: 0, state: 'active' };
+    let file: WritableFile | null = null;
+    const picker = (window as unknown as { showSaveFilePicker?: SavePicker }).showSaveFilePicker;
+    if (picker) {
+      try {
+        file = await (await picker({ suggestedName: name })).createWritable();
+      } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') return; // dialog cancelled
+        file = null;
+      }
+    }
+    if (!file && size > MAX_MEMORY_DOWNLOAD) {
+      t.state = 'error';
+      t.message = 'Too large to download in this browser. Use Chrome or Edge for files over 512 MB.';
+      this.on.transfer?.({ ...t });
+      return;
+    }
+    this.downloads.set(id, { t, parts: [], file, writes: Promise.resolve() });
     this.on.transfer?.({ ...t });
     this.sendFileMsg({ t: 'get', id, path });
+  }
+
+  private abortDownload(d: Download, state: Transfer['state'], message?: string) {
+    this.downloads.delete(d.t.id);
+    d.parts = [];
+    d.file?.abort().catch(() => {});
+    d.t.state = state;
+    d.t.message = message;
+    this.on.transfer?.({ ...d.t });
   }
 
   cancel(id: number) {
@@ -539,10 +596,13 @@ export class RemoteSession {
     const u = this.uploads.get(id);
     const t = d?.t ?? u;
     if (!t || t.state !== 'active') return;
-    t.state = 'cancelled';
     this.sendFileMsg({ t: 'cancel', id });
+    if (d) {
+      this.abortDownload(d, 'cancelled');
+      return;
+    }
+    t.state = 'cancelled';
     this.on.transfer?.({ ...t });
-    this.downloads.delete(id);
   }
 
   private onFiles(data: string | ArrayBuffer) {
@@ -550,8 +610,18 @@ export class RemoteSession {
       const c = parseFileChunk(data);
       const d = c && this.downloads.get(c.id);
       if (!d || !c) return;
-      d.parts.push(new Uint8Array(c.data));
-      d.t.done += c.data.byteLength;
+      const chunk = new Uint8Array(c.data);
+      d.t.done += chunk.byteLength;
+      if (d.file) {
+        const file = d.file;
+        d.writes = d.writes.then(() => file.write(chunk));
+      } else if (d.t.done > MAX_MEMORY_DOWNLOAD) {
+        this.sendFileMsg({ t: 'cancel', id: d.t.id });
+        this.abortDownload(d, 'error', 'Too large to download in this browser. Use Chrome or Edge for files over 512 MB.');
+        return;
+      } else {
+        d.parts.push(chunk);
+      }
       this.on.transfer?.({ ...d.t });
       return;
     }
@@ -573,15 +643,27 @@ export class RemoteSession {
         const d = this.downloads.get(m.id);
         if (!d) break;
         this.downloads.delete(m.id);
-        d.t.state = 'done';
-        this.on.transfer?.({ ...d.t });
+        const finished = () => {
+          d.t.state = 'done';
+          this.on.transfer?.({ ...d.t });
+          this.audit('file_received', `${d.t.name} (${d.t.size} bytes)`);
+        };
+        if (d.file) {
+          const file = d.file;
+          d.writes
+            .then(() => file.close())
+            .then(finished)
+            .catch((e) => this.abortDownload(d, 'error', `Could not save the file: ${e}`));
+          break;
+        }
         const url = URL.createObjectURL(new Blob(d.parts as BlobPart[]));
+        d.parts = [];
         const a = document.createElement('a');
         a.href = url;
         a.download = d.t.name;
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 60_000);
-        this.audit('file_received', `${d.t.name} (${d.t.size} bytes)`);
+        finished();
         break;
       }
       case 'put_done': {
@@ -595,12 +677,14 @@ export class RemoteSession {
         break;
       }
       case 'error': {
-        const t = this.downloads.get(m.id)?.t ?? this.uploads.get(m.id);
-        if (t) {
-          t.state = 'error';
-          t.message = m.message;
-          this.on.transfer?.({ ...t });
-          this.downloads.delete(m.id);
+        const d = this.downloads.get(m.id);
+        const u = this.uploads.get(m.id);
+        if (d) {
+          this.abortDownload(d, 'error', m.message);
+        } else if (u) {
+          u.state = 'error';
+          u.message = m.message;
+          this.on.transfer?.({ ...u });
           this.uploads.delete(m.id);
         } else if (m.message) {
           this.on.error?.(m.message);

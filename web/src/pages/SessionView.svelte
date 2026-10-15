@@ -114,7 +114,6 @@
   }
 
   const combos: { label: string; keys: string[] }[] = [
-    { label: 'Ctrl+Alt+Del', keys: ['ControlLeft', 'AltLeft', 'Delete'] },
     { label: 'Ctrl+Shift+Esc', keys: ['ControlLeft', 'ShiftLeft', 'Escape'] },
     { label: 'Windows key', keys: ['MetaLeft'] },
     { label: 'Alt+Tab', keys: ['AltLeft', 'Tab'] },
@@ -267,7 +266,7 @@
                 {#if e.dir}
                   <button class="entry" onclick={() => remote?.listDir(listing!.path + (listing!.path.endsWith('/') || listing!.path.endsWith('\\') ? '' : agent?.os === 'windows' ? '\\' : '/') + e.name)}>📁 {e.name}</button>
                 {:else}
-                  <button class="entry" title="Download {formatTime(new Date(e.mtime * 1000).toISOString())}" onclick={() => remote?.download(listing!.path + (agent?.os === 'windows' ? '\\' : '/') + e.name)}>
+                  <button class="entry" title="Download {formatTime(new Date(e.mtime * 1000).toISOString())}" onclick={() => remote?.download(listing!.path + (agent?.os === 'windows' ? '\\' : '/') + e.name, e.size)}>
                     📄 {e.name} <span class="muted">{formatBytes(e.size)}</span>
                   </button>
                 {/if}

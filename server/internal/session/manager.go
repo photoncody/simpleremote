@@ -73,8 +73,12 @@ type room struct {
 
 	sess        store.SupportSession
 	resumeToken string
-	consented   bool
-	ended       bool
+	// tokenAcked is set once the agent has shown it received its resume
+	// token. Until then the code stays usable by an agent that reconnects,
+	// so a dropped first handshake doesn't strand the session.
+	tokenAcked bool
+	consented  bool
+	ended      bool
 
 	tech        *peer
 	agent       *peer

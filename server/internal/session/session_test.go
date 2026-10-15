@@ -212,6 +212,47 @@ func TestFullFlow(t *testing.T) {
 	}
 }
 
+// If the first connection drops before the agent receives its resume token,
+// the agent can rejoin with the code. Once it acknowledges the token, the
+// code is retired.
+func TestCodeUsableUntilTokenAcked(t *testing.T) {
+	h := newHarness(t)
+	ss, _ := h.m.Create(context.Background(), h.tech, "")
+
+	first := h.dialAgent()
+	first.send(proto.TypeJoin, proto.Join{ProtocolVersion: proto.Version, Code: ss.Code})
+	// While an agent holds the code, nobody else can use it.
+	other := h.dialAgent()
+	other.send(proto.TypeJoin, proto.Join{ProtocolVersion: proto.Version, Code: ss.Code})
+	other.expect(proto.TypeError, nil)
+	first.ws.CloseNow() // dropped before reading the hello
+
+	var hello proto.Hello
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		again := h.dialAgent()
+		again.send(proto.TypeJoin, proto.Join{ProtocolVersion: proto.Version, Code: ss.Code})
+		env := again.recv()
+		if env.Type == proto.TypeHello {
+			_ = json.Unmarshal(env.Data, &hello)
+			again.send(proto.TypeAgentInfo, proto.AgentInfo{Hostname: "PC"})
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("rejoin with code failed: %s", env.Data)
+		}
+		time.Sleep(20 * time.Millisecond) // server hasn't noticed the drop yet
+	}
+	if hello.ResumeToken == "" {
+		t.Fatal("no resume token on rejoin")
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	late := h.dialAgent()
+	late.send(proto.TypeJoin, proto.Join{ProtocolVersion: proto.Version, Code: ss.Code})
+	late.expect(proto.TypeError, nil)
+}
+
 func TestConsentDenied(t *testing.T) {
 	h := newHarness(t)
 	ss, _ := h.m.Create(context.Background(), h.tech, "")
