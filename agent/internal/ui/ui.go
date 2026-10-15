@@ -4,6 +4,7 @@ package ui
 
 import (
 	_ "embed"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -57,6 +58,10 @@ type App struct {
 	persistOn      bool
 	tabs           *container.AppTabs
 	unread         int
+	// elevateOnStart is the consent window's administrator checkbox: ask for
+	// administrator rights as soon as the user allows the session.
+	elevateOnStart bool
+	elevateTried   bool
 
 	// While a session is live, a slim always-on-top bar sits at the top of
 	// the screen and the full window steps out of the way.
@@ -200,7 +205,27 @@ func (u *App) AskConsent(h proto.Hello) {
 		allow := widget.NewButton("Allow", func() { u.sess.Respond(true) })
 		allow.Importance = widget.HighImportance
 		buttons := container.NewGridWithColumns(2, deny, allow)
-		u.setContent("Allow remote support?", container.NewVBox(msg, warn, can, layout.NewSpacer(), buttons))
+
+		body := container.NewVBox(msg, warn, can)
+		// Most support work needs administrator rights, so offer it up front
+		// rather than interrupting later. Windows still asks separately, and
+		// the session carries on at normal level if that is turned down.
+		if platform.CanElevate() {
+			u.elevateOnStart = true
+			admin := widget.NewCheck("Also let them make administrator changes", func(on bool) {
+				u.elevateOnStart = on
+			})
+			admin.SetChecked(true)
+			note := wrapLabel("Windows will ask you to confirm this separately. " +
+				"If you say no, or you don't have an administrator account, the session still works.")
+			note.Importance = widget.LowImportance
+			body.Add(widget.NewSeparator())
+			body.Add(admin)
+			body.Add(note)
+		}
+		body.Add(layout.NewSpacer())
+		body.Add(buttons)
+		u.setContent("Allow remote support?", body)
 	})
 }
 
@@ -292,6 +317,7 @@ func (u *App) Active(h proto.Hello) {
 			u.w.Hide()
 		}
 		u.a.SendNotification(fyne.NewNotification("Remote session active", h.TechName+" can see and control this computer."))
+		u.elevateIfAsked()
 	})
 }
 
@@ -357,6 +383,34 @@ func (u *App) Activity(text string) {
 // ElevationRequested implements core.UI.
 func (u *App) ElevationRequested(techName string) {
 	fyne.Do(func() { u.askElevate(true) })
+}
+
+// elevateIfAsked asks Windows for administrator rights when the user ticked
+// the box on the consent window. Turning the Windows prompt down, or having no
+// administrator account, leaves the session running at normal level.
+func (u *App) elevateIfAsked() {
+	if !u.elevateOnStart || u.elevateTried || !platform.CanElevate() {
+		return
+	}
+	u.elevateTried = true
+	// Let the session window settle before the Windows prompt appears.
+	time.AfterFunc(500*time.Millisecond, func() {
+		fyne.Do(func() {
+			if u.state != "active" {
+				return
+			}
+			err := u.sess.Elevate()
+			switch {
+			case err == nil:
+				// The elevated copy takes over the session.
+				u.a.Quit()
+			case errors.Is(err, platform.ErrCancelled):
+				u.Activity("Administrator access was declined. The session continues without it.")
+			default:
+				u.Activity("Could not start as administrator: " + err.Error())
+			}
+		})
+	})
 }
 
 func (u *App) askElevate(requested bool) {
