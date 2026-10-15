@@ -55,6 +55,14 @@ type App struct {
 	activityScroll *container.Scroll
 	persistBanner  *widget.Label
 	persistOn      bool
+	tabs           *container.AppTabs
+	unread         int
+
+	// While a session is live, a slim always-on-top bar sits at the top of
+	// the screen and the full window steps out of the way.
+	bar        fyne.Window
+	barStatus  *widget.Label
+	barDetails *widget.Button
 }
 
 // Run shows the window and blocks until it closes.
@@ -199,6 +207,7 @@ func (u *App) AskConsent(h proto.Hello) {
 // NeedPermissions implements core.UI.
 func (u *App) NeedPermissions(p platform.Permissions) {
 	fyne.Do(func() {
+		u.w.Show() // the bar may have hidden the window this dialog belongs to
 		var missing []string
 		if !p.ScreenRecording {
 			missing = append(missing, "Screen Recording")
@@ -268,15 +277,20 @@ func (u *App) Active(h proto.Hello) {
 		u.persistBanner.Importance = widget.WarningImportance
 		u.persistBanner.Hide()
 
-		tabs := container.NewAppTabs(
+		u.tabs = container.NewAppTabs(
 			container.NewTabItem("Chat", container.NewBorder(nil, chatRow, nil, nil, u.chatScroll)),
 			container.NewTabItem("Activity", u.activityScroll),
 		)
 		u.setContent("Remote session active", container.NewBorder(
-			container.NewVBox(status, actions, u.persistBanner, widget.NewSeparator()), nil, nil, nil, tabs))
+			container.NewVBox(status, actions, u.persistBanner, widget.NewSeparator()), nil, nil, nil, u.tabs))
 		u.applyPersistBanner()
 		u.Activity("Session started.")
 		u.setTray(true)
+		// Swap the window for a bar across the top of the screen, so the
+		// session stays visible without covering the user's work.
+		if u.showSessionBar(h.TechName) {
+			u.w.Hide()
+		}
 		u.a.SendNotification(fyne.NewNotification("Remote session active", h.TechName+" can see and control this computer."))
 	})
 }
@@ -286,6 +300,7 @@ func (u *App) PersistState(on bool) {
 	fyne.Do(func() {
 		u.persistOn = on
 		u.applyPersistBanner()
+		u.setBarStatus(u.techName)
 	})
 }
 
@@ -315,7 +330,13 @@ func (u *App) Chat(from, text string) {
 			l.Importance = widget.LowImportance
 		} else {
 			l.TextStyle = fyne.TextStyle{Bold: true}
-			u.w.RequestFocus()
+			if u.bar != nil {
+				// Don't interrupt: mark the bar and let the user open it.
+				u.unread++
+				u.flagBar(u.unread)
+			} else {
+				u.w.RequestFocus()
+			}
 		}
 		u.chatBox.Add(l)
 		u.chatScroll.ScrollToBottom()
@@ -339,6 +360,8 @@ func (u *App) ElevationRequested(techName string) {
 }
 
 func (u *App) askElevate(requested bool) {
+	// Dialogs belong to the main window, which may be hidden behind the bar.
+	u.w.Show()
 	msg := "Restart SimpleRemote as administrator? This lets the technician work with programs and settings that need " +
 		"administrator rights. Windows will ask you to confirm."
 	if requested {
@@ -371,6 +394,10 @@ func (u *App) Ended(reason string) {
 		}
 		prev := u.state
 		u.state = "ended"
+		// The session is over: drop the bar and bring the window back so the
+		// user sees why it ended.
+		u.closeSessionBar()
+		u.w.Show()
 		u.w.SetTitle("SimpleRemote")
 		u.setTray(false)
 		closeBtn := widget.NewButton("Close", u.a.Quit)
@@ -392,6 +419,10 @@ func (u *App) Ended(reason string) {
 }
 
 func (u *App) confirmEnd() {
+	// The confirmation belongs to the main window, which the bar may have
+	// pushed out of sight.
+	u.w.Show()
+	u.w.RequestFocus()
 	dialog.ShowConfirm("End session?", "The technician will be disconnected.", func(ok bool) {
 		if ok {
 			u.sess.End()
@@ -403,11 +434,16 @@ func (u *App) onClose() {
 	switch u.state {
 	case "consent":
 		u.sess.Respond(false)
-	case "active", "connecting":
-		if u.state == "active" {
-			u.confirmEnd()
+	case "active":
+		// While the bar is up it, not this window, is the session indicator:
+		// closing the window just puts the details away.
+		if u.bar != nil {
+			u.w.Hide()
 			return
 		}
+		u.confirmEnd()
+		return
+	case "connecting":
 		u.sess.End()
 	}
 	u.a.Quit()
