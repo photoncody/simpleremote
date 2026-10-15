@@ -96,10 +96,10 @@
 {#if created}
   <section class="card newsession" aria-live="polite">
     {#if secondsLeft > 0 && (!createdLive || createdLive.state === 'pending')}
-      <p class="muted">Ask the user to go to <strong>{created.join_url}</strong> and enter:</p>
+      <p class="muted">On the target computer, go to <strong>{created.join_url}</strong> and enter this code, or ask your client to do so:</p>
       <p class="bigcode code">{created.code}</p>
       <p class="muted">
-        Code expires in {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')}. Waiting for the user…
+        Code expires in {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')}. Waiting for the target computer…
       </p>
       <div class="row">
         <button onclick={copyInstructions}>{copied ? 'Copied' : 'Copy instructions'}</button>
@@ -116,7 +116,7 @@
 <section>
   <h2>Your live sessions</h2>
   {#if mine.length === 0}
-    <p class="muted">No live sessions. Click <strong>New session</strong> to get a code for a user.</p>
+    <p class="muted">No live sessions. Click <strong>New session</strong> to get a code for a computer you are setting up or a client you are helping.</p>
   {:else}
     <table>
       <thead>

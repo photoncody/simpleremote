@@ -1,16 +1,31 @@
 # SimpleRemote
 
-Simple, self-hosted, **attended** remote support. A technician creates a one-time code, the user enters it on your support website, downloads a small app, and clicks **Allow**. The technician then sees and controls the user's computer from a web browser. When the session ends, the app closes. Nothing is installed and nothing keeps running.
+Self-hosted, **temporary remote access for unmanaged PCs and VMs**, intended as an alternative to ScreenConnect manual sessions. Launch SimpleRemote at a machine that does not yet have your RMM agent, approve the session locally, and finish setup from your workstation's browser. Installing your organization's RMM agent and confirming access is a common next step.
+
+Phone-assisted client support and helping friends or family are also supported: give the person a session code, have them run the downloaded app, and connect after they click **Allow**. In today's portable mode, the agent installs no system service and exits when the session ends. Optional reconnect after restart uses temporary per-user autostart.
 
 - **No accounts for end users.** Technicians sign in with your identity provider (OIDC), with an environment-configured backup admin for when single sign-on is down.
 - **Windows, macOS, and Linux** agents, built by GitHub Actions on every push.
 - **One Docker container** (plus an optional TURN relay), configured entirely by environment variables.
 - Screen viewing and control, multiple monitors, clipboard sync, file transfer, chat, a Windows "run as administrator" handoff, and an audit log.
 
-## How it works
+## Technician workflow
+
+1. Sign in at `/tech` from your workstation and create a session.
+2. At the unmanaged PC or VM, open the support website, enter the session code, and run the downloaded agent.
+3. Check the technician identity and click **Allow**. On Windows, the initial prompt offers administrator access; Windows UAC asks for confirmation separately.
+4. Return to your workstation and open the session viewer to configure the machine, exchange files, or install your RMM software manually.
+5. If setup requires a reboot, enable **Stay connected after restart** before restarting. Reconnect currently requires the approving user's login and the original agent executable to remain available.
+6. Confirm your RMM access, then end the SimpleRemote session.
+
+For a client on the phone, ask them to perform the download and approval steps while you remain in the technician console. Neither workflow requires a technician account on the target machine.
+
+See [Workflows](docs/WORKFLOWS.md) for current behavior and limitations, and the [implementation roadmap](ROADMAP.md) for planned improvements.
+
+## How it works today
 
 ```
- Technician's browser                 SimpleRemote server                End user's computer
+ Technician's browser                 SimpleRemote server                Target computer
  ───────────────────                  ───────────────────                ───────────────────
  Sign in (OIDC) ───────────────────▶  checks group/email/domain rules
  "New session" ────────────────────▶  issues code 482913     
@@ -29,11 +44,11 @@ The server only relays signaling, and nothing reaches the agent's WebRTC stack u
 
 ### Built-in safeguards
 
-SimpleRemote is for helping people who asked for help. The design reflects that:
+Temporary access starts with local approval, whether a technician is preparing a machine or a client is receiving help:
 
-- The agent runs only when the user starts it. It doesn't install a service or stay running after the session ends. "Stay connected after restart" (off unless the tech turns it on) adds only a per-user autostart that rejoins the same session once after a reboot and is removed when the session ends; it never survives the session.
+- Portable mode installs no system service. The agent starts locally and exits when the session ends. "Stay connected after restart" is off until enabled by the technician; it adds temporary per-user autostart to rejoin the same session after login. The agent removes reconnect state when it receives session end or encounters an invalid/expired resume. See [Workflows](docs/WORKFLOWS.md) for offline cleanup and reconnect limits.
 - The user sees the technician's name, email, and organization, plus a warning about unexpected callers, and must click **Allow** before anything is shared. Unanswered prompts are declined after 5 minutes.
-- The agent window stays open with an **End session** button for the whole session, and closing it ends the session.
+- A visible session bar (or the agent window where the bar is unavailable) shows the technician and an **End session** button. The full window provides chat and activity details.
 - Codes are single-use, short-lived, and rate-limited against guessing.
 - File transfers, clipboard sharing, and administrator requests are shown to the user. Elevation always goes through the normal Windows UAC prompt.
 - Clipboard text that a password manager marks as sensitive is never sent.
@@ -74,7 +89,7 @@ SimpleRemote is for helping people who asked for help. The design reflects that:
 
 5. For the TURN relay (coturn, host networking), open UDP/TCP 3478 and UDP 49160–49250 on the firewall.
 
-Technicians use `https://support.example.com/tech`; end users go to `https://support.example.com/`.
+Technicians use `https://support.example.com/tech`. On the target machine, the technician or client enters the code at `https://support.example.com/`.
 
 ## Configuration
 
@@ -172,8 +187,11 @@ deploy/   Dockerfile, docker-compose.yml with coturn, .env.example
 
 - One server instance. Live sessions are held in memory, and sessions in progress end on restart.
 - The screen is sent as JPEG tiles over a data channel. That works well on broadband; a video codec would use less bandwidth on slow links.
-- Windows: the agent can't see the secure desktop (UAC prompts and the lock screen) or send Ctrl+Alt+Del, because those need a system service, which SimpleRemote deliberately doesn't install.
+- Windows: today's portable agent cannot view or control the secure desktop (UAC prompts, lock screen, or login screen), or send Ctrl+Alt+Del. Administrator elevation does not remove these limitations.
+- Reconnect after restart is per-user and requires login; it does not provide pre-login access. Server restarts end active sessions.
 - Linux: Wayland support (via the xdg-desktop-portal RemoteDesktop API) is planned.
+
+The [roadmap](ROADMAP.md) prioritizes reusable technician downloads, agent-generated join codes, session labels, explicit temporary access windows, more reliable elevation and reboot continuity, installer transfer queues, and an approved RMM installation workflow. An optional temporary Windows service is planned for access across logout, reboot, and supported desktop transitions. It is not implemented; login, lock, and UAC access require platform validation before being promised. Portable mode remains part of the plan.
 
 ## License
 

@@ -61,14 +61,14 @@
     <div class="brand">
       <img src="/favicon.svg" alt="" width="36" height="36" />
       <div>
-        <h1>Remote support</h1>
+        <h1>Temporary remote access</h1>
         {#if orgName}<p class="muted">{orgName}</p>{/if}
       </div>
     </div>
 
     {#if !result}
       <form onsubmit={submit}>
-        <label for="code">Enter the code your support technician gave you</label>
+        <label for="code">Enter your session code</label>
         <input
           id="code"
           class="code big"
@@ -85,8 +85,8 @@
         <button class="primary wide" disabled={busy || digits.length !== CODE_LENGTH}>{busy ? 'Checking…' : 'Continue'}</button>
       </form>
       <p class="muted small">
-        Only use a code from someone you trust and are talking to right now. Your technician will be able to see and
-        control your screen after you allow it, and you can end the session at any time.
+        Use the code from your technician console, or one given to you by a trusted technician you are working with.
+        The technician can see and control this computer after you allow it. You can end the session at any time.
       </p>
     {:else}
       <div class="who">
@@ -94,7 +94,8 @@
           You're connecting to <strong>{result.tech_name}</strong> at <strong>{result.org_name}</strong>.
         </p>
         <p class="notice small">
-          If you weren't expecting this, or someone called you out of the blue, stop here and close this page.
+          Check that this is the technician you expect, including yourself if you are setting up this machine.
+          If someone contacted you unexpectedly, stop here and close this page.
         </p>
       </div>
 
@@ -142,7 +143,8 @@
               <li>Check the technician's name, then click <strong>Allow</strong>.</li>
             </ol>
           {/if}
-          <p class="muted small">The app doesn't install anything. It closes when the session ends.</p>
+          <p class="muted small">The portable app installs no system service and closes when the session ends. If reconnect after restart is enabled,
+            it temporarily starts again when the approving user logs in.</p>
         </section>
       {/if}
 

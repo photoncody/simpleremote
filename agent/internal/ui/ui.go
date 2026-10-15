@@ -153,8 +153,8 @@ func (u *App) showSetup() {
 		u.start(s, c)
 	}
 	form := widget.NewForm(widget.NewFormItem("Support website", server), widget.NewFormItem("Code", code))
-	u.setContent("Connect to your technician", container.NewVBox(
-		wrapLabel("Enter the website and code your support technician gave you."),
+	u.setContent("Connect this computer", container.NewVBox(
+		wrapLabel("Enter the website and session code from your technician console, or those given to you by your technician."),
 		form, errLabel, connect,
 	))
 }
@@ -196,7 +196,7 @@ func (u *App) AskConsent(h proto.Hello) {
 		msg := widget.NewRichTextFromMarkdown(fmt.Sprintf(
 			"**%s** from **%s** wants to see and control this computer.", escapeMD(who), escapeMD(h.OrgName)))
 		msg.Wrapping = fyne.TextWrapWord
-		warn := wrapLabel("Only allow this if you asked " + h.OrgName + " for help, or you're talking with them right now. " +
+		warn := wrapLabel("Only allow this if you recognize the technician and intended to grant access, either for computer setup or help from " + h.OrgName + ". " +
 			"Never allow someone who contacted you unexpectedly.")
 		warn.Importance = widget.WarningImportance
 		can := wrapLabel("If you allow it, they can see your screen, use your mouse and keyboard, and exchange files with you. " +
@@ -225,7 +225,7 @@ func (u *App) AskConsent(h proto.Hello) {
 		}
 		body.Add(layout.NewSpacer())
 		body.Add(buttons)
-		u.setContent("Allow remote support?", body)
+		u.setContent("Allow temporary remote access?", body)
 	})
 }
 
