@@ -105,15 +105,15 @@ func (d *Dist) load(p Platform) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if p.ext == "" {
-		data = stamp.Strip(data)
-	}
 	d.cache[p.ID] = cached{mod: fi.ModTime(), size: fi.Size(), data: data}
 	return data, nil
 }
 
 // Filename is the name the browser saves the download as.
 func Filename(p Platform, code string) string {
+	if code == "" {
+		return "SimpleRemote-Technician" + p.ext
+	}
 	return "SimpleRemote-" + code + p.ext
 }
 
@@ -123,12 +123,20 @@ func (d *Dist) Write(w io.Writer, p Platform, s stamp.Stamp) error {
 	if err != nil {
 		return err
 	}
+	if s.Code == "" && p.ext != ".zip" {
+		if _, err := stamp.Parse(base); !errors.Is(err, stamp.ErrNotStamped) {
+			return errors.New("reusable agent requires an unstamped base executable")
+		}
+	}
 	if p.ext == ".zip" {
 		return stampZip(w, base, s)
 	}
 	trailer, err := stamp.Trailer(s)
 	if err != nil {
 		return err
+	}
+	if p.ext == "" {
+		base = stamp.Strip(base)
 	}
 	if p.ext == ".exe" {
 		// Keeps an Authenticode signature valid. Anything that doesn't parse
@@ -163,10 +171,45 @@ func stampZip(w io.Writer, base []byte, s stamp.Stamp) error {
 	}
 	const bundle = "SimpleRemote.app/"
 	newBundle := "SimpleRemote-" + s.Code + ".app/"
+	if s.Code == "" {
+		newBundle = "SimpleRemote-Technician.app/"
+	}
 	noStamp := false
 	for _, f := range zr.File {
 		if strings.HasSuffix(f.Name, ".app/"+NoStampMarker) {
 			noStamp = true
+			if s.Code == "" {
+				rc, err := f.Open()
+				if err != nil {
+					return err
+				}
+				configured, err := io.ReadAll(io.LimitReader(rc, 8193))
+				rc.Close()
+				if err != nil {
+					return err
+				}
+				if strings.TrimSpace(string(configured)) != s.ServerURL {
+					return errors.New("signed macOS reusable agent must be rebuilt with the matching public server URL marker")
+				}
+			}
+		}
+	}
+	if noStamp && s.Code == "" {
+		for _, f := range zr.File {
+			if strings.Contains(f.Name, ".app/Contents/MacOS/") && !f.FileInfo().IsDir() {
+				rc, err := f.Open()
+				if err != nil {
+					return err
+				}
+				data, err := io.ReadAll(rc)
+				rc.Close()
+				if err != nil {
+					return err
+				}
+				if _, err := stamp.Parse(data); !errors.Is(err, stamp.ErrNotStamped) {
+					return errors.New("signed reusable agent contains a stamp")
+				}
+			}
 		}
 	}
 	zw := zip.NewWriter(w)
@@ -199,6 +242,11 @@ func stampZip(w io.Writer, base []byte, s stamp.Stamp) error {
 		rc.Close()
 		if err != nil {
 			return err
+		}
+		if s.Code == "" {
+			if _, err := stamp.Parse(data); !errors.Is(err, stamp.ErrNotStamped) {
+				return errors.New("reusable agent requires unstamped bundle executables")
+			}
 		}
 		hdr.CRC32, hdr.CompressedSize64, hdr.UncompressedSize64 = 0, 0, 0
 		hdr.Method = zip.Deflate

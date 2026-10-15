@@ -86,7 +86,10 @@ func main() {
 	}
 	if opts.ServerURL == "" && opts.ResumeToken == "" {
 		if st, path, err := readStamp(); err == nil {
-			opts.ServerURL, opts.Code, opts.OrgName = st.ServerURL, st.Code, st.OrgName
+			opts.ServerURL, opts.OrgName = st.ServerURL, st.OrgName
+			if opts.Code == "" {
+				opts.Code = st.Code
+			}
 		} else {
 			slog.Info("no stamp found", "err", err)
 			opts.ServerURL = defaultServer

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, ApiError, type CreatedSession, type LiveSession } from '../lib/api';
+  import { api, ApiError, type CreatedSession, type LiveSession, type Platform } from '../lib/api';
   import { formatDuration, osLabel, stateLabels } from '../lib/format';
   import { link, router } from '../lib/router.svelte';
 
@@ -12,6 +12,11 @@
   let busy = $state(false);
   let now = $state(Date.now());
   let copied = $state(false);
+  let downloads = $state<{ server_url: string; platforms: Platform[] } | null>(null);
+  let downloadError = $state('');
+  $effect(() => {
+    api<{ server_url: string; platforms: Platform[] }>('GET', '/api/agents').then((data) => { downloads = data; }).catch(() => { downloadError = 'Could not load reusable agent downloads. Reload to retry.'; });
+  });
 
   const mine = $derived(sessions.filter((s) => s.mine).sort((a, b) => b.created_at.localeCompare(a.created_at)));
   const others = $derived(sessions.filter((s) => !s.mine));
@@ -112,6 +117,23 @@
     {/if}
   </section>
 {/if}
+
+<section class="card">
+  <h2>Reusable technician agent</h2>
+  <p>Keep an agent on a USB drive or network share. Create a session here, run the agent on the target computer, enter the code, and approve access locally.</p>
+  {#if downloads}
+    <p class="muted">Configured server: <strong>{downloads.server_url}</strong>. These downloads contain no session credentials.</p>
+    {#if downloads.platforms.length}
+      <div class="row">
+        {#each downloads.platforms as p (p.id)}
+          <a class="button" href="/api/agents/{p.id}" download>{p.label}</a>
+        {/each}
+      </div>
+      <p class="muted small">Signed macOS builds must be configured for this server. Reconnect after restart requires the drive or share to remain available at login.</p>
+    {:else}<p class="muted">No agent builds are installed on this server.</p>{/if}
+  {:else if downloadError}<p class="error" role="alert">{downloadError}</p>
+  {:else}<p class="muted">Loading downloads…</p>{/if}
+</section>
 
 <section>
   <h2>Your live sessions</h2>

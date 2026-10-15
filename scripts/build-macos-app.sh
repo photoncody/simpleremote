@@ -30,7 +30,7 @@ if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
     exit 1
   fi
   # Tell the server not to modify this (signed) app.
-  touch "$APP/Contents/Resources/simpleremote-nostamp"
+  printf '%s\n' "$DEFAULT_SERVER" > "$APP/Contents/Resources/simpleremote-nostamp"
   codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "$APP"
 else
   # Ad-hoc signature: required for Apple silicon, but not trusted by Gatekeeper.

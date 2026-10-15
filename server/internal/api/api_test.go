@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -129,5 +131,70 @@ func TestCSVSafe(t *testing.T) {
 	got := csvSafe([]string{"=cmd()", "PC-1", "@x", ""})
 	if got[0] != "'=cmd()" || got[1] != "PC-1" || got[2] != "'@x" || got[3] != "" {
 		t.Fatalf("csvSafe = %v", got)
+	}
+}
+
+func TestReusableAgentRoutes(t *testing.T) {
+	srv, m := newServer(t)
+	for _, path := range []string{"/api/agents", "/api/agents/windows-amd64"} {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 401 {
+			t.Fatalf("unauthorized %s = %d", path, resp.StatusCode)
+		}
+	}
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	resp, err := c.Post(srv.URL+"/api/auth/local", "application/json", strings.NewReader(`{"username":"admin","password":"a-long-password"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("login = %d", resp.StatusCode)
+	}
+	resp, err = c.Get(srv.URL + "/api/agents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var info struct {
+		ServerURL string          `json:"server_url"`
+		Platforms []dist.Platform `json:"platforms"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&info)
+	resp.Body.Close()
+	if err != nil || resp.StatusCode != 200 || info.ServerURL != srv.URL || len(info.Platforms) != 1 {
+		t.Fatalf("list = %+v, %v", info, err)
+	}
+	// Query parameters cannot supply a session code or override server config.
+	resp, err = c.Get(srv.URL + "/api/agents/windows-amd64?code=123456&resume=secret&server=https://other.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	want := stamp.Stamp{ServerURL: srv.URL, OrgName: "Acme IT"}
+	got, err := stamp.Parse(data)
+	if resp.StatusCode != 200 || err != nil || got != want {
+		t.Fatalf("download = %d %+v %v", resp.StatusCode, got, err)
+	}
+	if resp.Header.Get("Cache-Control") != "no-store" || !strings.Contains(resp.Header.Get("Content-Disposition"), "SimpleRemote-Technician.exe") {
+		t.Fatal("download headers")
+	}
+	if len(m.List(auth.Identity{Subject: "local|admin"})) != 0 {
+		t.Fatal("download created a session")
+	}
+	for _, platform := range []string{"linux-amd64", "unknown"} {
+		resp, err = c.Get(srv.URL + "/api/agents/" + platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 404 {
+			t.Fatalf("missing %s = %d", platform, resp.StatusCode)
+		}
 	}
 }

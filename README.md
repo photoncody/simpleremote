@@ -12,7 +12,7 @@ Phone-assisted client support and helping friends or family are also supported: 
 ## Technician workflow
 
 1. Sign in at `/tech` from your workstation and create a session.
-2. At the unmanaged PC or VM, open the support website, enter the session code, and run the downloaded agent.
+2. At the unmanaged PC or VM, run your reusable technician agent and enter the session code, or open the support website, enter the code, and run the session-specific download.
 3. Check the technician identity and click **Allow**. On Windows, the initial prompt offers administrator access; Windows UAC asks for confirmation separately.
 4. Return to your workstation and open the session viewer to configure the machine, exchange files, or install your RMM software manually.
 5. If setup requires a reboot, enable **Stay connected after restart** before restarting. Reconnect currently requires the approving user's login and the original agent executable to remain available.
@@ -97,7 +97,7 @@ Everything is an environment variable. Each one can also be read from a file wit
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `PUBLIC_URL` | *required* | External `https://` URL. Used for OIDC redirects and baked into agent downloads. |
+| `PUBLIC_URL` | *required* | External `https://` URL without credentials, query, or fragment. Used for OIDC redirects and baked into agent downloads. |
 | `ORG_NAME` | `SimpleRemote` | Shown to end users on the website and in the consent prompt. |
 | `SESSION_SECRET` | random | 32+ characters. Signs sign-in state. Set it so sign-ins survive restarts. |
 | `OIDC_ISSUER` | | Issuer URL of your identity provider. Enables single sign-on. |
@@ -148,6 +148,16 @@ The server refuses to start with an unsafe or incomplete configuration (for exam
 
 The server writes the server URL and session code into each download (a small trailer the OS loader ignores), so users only have to run it. If that information is missing, the agent asks for the website and code.
 
+### Reusable technician download
+
+The **Reusable technician agent** section in `/tech` offers available platform builds configured with this server's public URL. Keep one on USB or a network share, create a session in the console, then run it at the target and enter the code. The setup screen displays the server before connecting; local consent still identifies the technician and requires **Allow**. These assets contain only the public server URL and organization name, with no join code, resume token, or technician sign-in secret. Downloads require technician authentication.
+
+Execution does not require writing beside the executable. Optional reconnect state is stored in the current user's configuration directory, not on USB or the share. If the medium becomes unavailable, reconnect or relaunch from it cannot work: keep it available at the same path for reboot reconnect, or copy the agent to local storage first. A running process does not need the drive for session-state writes; OS executable paging and network-share availability still apply.
+
+Existing session-specific downloads remain available. Unsigned Linux/Windows and stampable macOS builds receive a server-only stamp for reusable downloads. Windows signed builds use the existing certificate-table stamping path. Signed/notarized macOS builds are not modified: rebuild them with `MACOS_DEFAULT_SERVER` matching `PUBLIC_URL` (including any path), using the updated build script that records the URL in the signed no-stamp marker. Legacy empty markers or a mismatched server are rejected for reusable downloads; their existing session-specific download behavior is unchanged. macOS still requires its normal OS permissions; unsigned/ad-hoc builds retain Gatekeeper restrictions.
+
+Server-only stamps require an agent built with roadmap item 02; older agents reject stamps without a code. Deploy updated agent assets with the updated server/UI before offering reusable downloads. No WebSocket protocol or database changes are needed.
+
 ### Code signing
 
 Unsigned agents work, but signed ones are much friendlier for end users. The release workflow signs automatically when these repository secrets are set:
@@ -191,7 +201,7 @@ deploy/   Dockerfile, docker-compose.yml with coturn, .env.example
 - Reconnect after restart is per-user and requires login; it does not provide pre-login access. Server restarts end active sessions.
 - Linux: Wayland support (via the xdg-desktop-portal RemoteDesktop API) is planned.
 
-The [roadmap](ROADMAP.md) prioritizes reusable technician downloads, agent-generated join codes, session labels, explicit temporary access windows, more reliable elevation and reboot continuity, installer transfer queues, and an approved RMM installation workflow. An optional temporary Windows service is planned for access across logout, reboot, and supported desktop transitions. It is not implemented; login, lock, and UAC access require platform validation before being promised. Portable mode remains part of the plan.
+The [roadmap](ROADMAP.md) prioritizes agent-generated join codes, session labels, explicit temporary access windows, more reliable elevation and reboot continuity, installer transfer queues, and an approved RMM installation workflow. An optional temporary Windows service is planned for access across logout, reboot, and supported desktop transitions. It is not implemented; login, lock, and UAC access require platform validation before being promised. Portable mode remains part of the plan.
 
 ## License
 

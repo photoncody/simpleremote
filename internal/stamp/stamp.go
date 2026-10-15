@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,7 +35,7 @@ const (
 // Stamp is the data embedded in a downloaded agent.
 type Stamp struct {
 	ServerURL string `json:"server_url"`
-	Code      string `json:"code"`
+	Code      string `json:"code"` // empty for reusable server-only downloads
 	OrgName   string `json:"org_name,omitempty"`
 }
 
@@ -43,11 +44,22 @@ var ErrNotStamped = errors.New("binary is not stamped")
 
 // Validate checks the stamp's fields.
 func (s Stamp) Validate() error {
-	if !strings.HasPrefix(s.ServerURL, "https://") && !strings.HasPrefix(s.ServerURL, "http://") {
-		return fmt.Errorf("invalid server URL %q", s.ServerURL)
+	if err := ValidateServerURL(s.ServerURL); err != nil {
+		return err
 	}
-	if !IsCode(s.Code) {
+	if s.Code != "" && !IsCode(s.Code) {
 		return fmt.Errorf("invalid code %q", s.Code)
+	}
+	return nil
+}
+
+// ValidateServerURL accepts the HTTP(S) transport used by the agent. HTTP is
+// retained for existing development deployments; production should use HTTPS.
+// Credentials, query strings and fragments must never enter reusable assets.
+func ValidateServerURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
+		return errors.New("enter a valid HTTP(S) server URL without credentials, query or fragment")
 	}
 	return nil
 }

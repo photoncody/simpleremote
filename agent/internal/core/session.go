@@ -20,6 +20,7 @@ import (
 	"github.com/photoncody/simpleremote/agent/internal/persist"
 	"github.com/photoncody/simpleremote/agent/internal/platform"
 	"github.com/photoncody/simpleremote/internal/proto"
+	"github.com/photoncody/simpleremote/internal/stamp"
 )
 
 // UI is implemented by the agent's window. Methods are called from
@@ -113,6 +114,9 @@ func (s *Session) Hello() proto.Hello {
 }
 
 func wsURL(server string) (string, error) {
+	if err := stamp.ValidateServerURL(server); err != nil {
+		return "", err
+	}
 	u, err := url.Parse(server)
 	if err != nil {
 		return "", err

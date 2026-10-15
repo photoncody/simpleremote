@@ -2,6 +2,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/csv"
 	"errors"
 	"io/fs"
@@ -56,6 +57,8 @@ func (s *Server) Handler() http.Handler {
 
 	// Tech console.
 	req := s.Auth.Require
+	mux.Handle("GET /api/agents", req(http.HandlerFunc(s.agentDownloads)))
+	mux.Handle("GET /api/agents/{platform}", req(http.HandlerFunc(s.downloadReusable)))
 	mux.Handle("GET /api/sessions", req(http.HandlerFunc(s.listSessions)))
 	mux.Handle("POST /api/sessions", req(http.HandlerFunc(s.createSession)))
 	mux.Handle("GET /api/sessions/{id}", req(http.HandlerFunc(s.getSession)))
@@ -140,6 +143,41 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Sessions.RecordDownload(ss.ID, p.ID, httpx.ClientIP(r))
+}
+
+// Reusable assets have only public organization configuration, never session
+// credentials. Authentication gates distribution, but is not embedded in it.
+func (s *Server) agentDownloads(w http.ResponseWriter, r *http.Request) {
+	httpx.WriteJSON(w, 200, map[string]any{"server_url": s.Config.PublicURL.String(), "platforms": s.Dist.Available()})
+}
+
+func (s *Server) downloadReusable(w http.ResponseWriter, r *http.Request) {
+	p, ok := dist.Lookup(r.PathValue("platform"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	st := stamp.Stamp{ServerURL: s.Config.PublicURL.String(), OrgName: s.Config.OrgName}
+	// Prepare before sending headers so invalid/missing builds return an error,
+	// rather than a successful download of a partial executable.
+	var out bytes.Buffer
+	if err := s.Dist.Write(&out, p, st); err != nil {
+		if errors.Is(err, dist.ErrUnavailable) {
+			httpx.Error(w, 404, "No agent build is installed for this platform.")
+			return
+		}
+		s.Log.Error("prepare reusable agent", "platform", p.ID, "err", err)
+		httpx.Error(w, 500, "Could not prepare reusable agent. Check server build configuration.")
+		return
+	}
+	ctype := "application/octet-stream"
+	if p.OS == "darwin" {
+		ctype = "application/zip"
+	}
+	w.Header().Set("Content-Type", ctype)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+dist.Filename(p, "")+`"`)
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(out.Bytes())
 }
 
 func tech(r *http.Request) auth.Identity {

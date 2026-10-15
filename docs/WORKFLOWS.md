@@ -10,14 +10,18 @@ SimpleRemote supplies the temporary connection. Your RMM supplies permanent mana
 
 1. From your workstation, sign in to the technician console at `/tech` using the configured identity provider or backup administrator account.
 2. Create a **New session**. Codes are single-use and expire after 10 minutes by default; the server operator can change this.
-3. At the target machine, open the support website, enter the code, and download the agent for its operating system. If you are on the phone with a client, ask them to do this.
+3. At the target machine, run a reusable technician agent from USB, a network share, or local storage and enter the code. Alternatively, open the support website, enter the code, and download the session-specific agent. If you are on the phone with a client, ask them to use that website workflow.
 4. Run the downloaded agent, verify the technician name, email, and organization, and click **Allow**. When connecting to your own technician session, verify your own identity. No technician sign-in is required on the target.
 5. On Windows, the approval screen offers administrator access with its checkbox initially selected. Windows asks for confirmation through normal UAC. Declining UAC leaves the session at normal privileges. Administrator access can also be requested later.
 6. Open the session viewer from your workstation. Configure the machine, transfer installers, or install your RMM software manually using the remote desktop. Approved installer shortcuts and automatic enrollment verification are not available yet.
 7. If you need a reboot, follow the reconnect requirements below before restarting.
 8. Confirm you can reach the machine through your RMM, then end the SimpleRemote session using the console or target's **End session** control.
 
-You currently need to create the session in the console before joining from the target. Agent-generated codes and a dedicated reusable technician download are planned. An unstamped agent already has manual website/code entry; that is not yet the planned reusable-download workflow.
+Create the session in the console before joining from the target; agent-generated codes remain planned. Download reusable agents from **Reusable technician agent** in `/tech`. They display the configured server and ask for a code each time; no session credentials are embedded. The existing website/code download workflow remains supported.
+
+Reusable agents can run from a read-only USB drive or share without writing credentials beside the executable. Optional reconnect state goes in the user configuration directory (Windows `%APPDATA%/SimpleRemote`, macOS `~/Library/Application Support/SimpleRemote`, Linux `$XDG_CONFIG_HOME/SimpleRemote` or `~/.config/SimpleRemote`). Reconnect needs the executable at its original path and the medium available after login. Copy to local storage before removing USB or disconnecting the share; an unavailable executable cannot be launched, and the OS may need its backing file even while running. A failed state write is reported when enabling reconnect; ordinary sessions do not require reconnect storage.
+
+Signed macOS reusable assets require a matching build-time server URL and the new signed URL marker; legacy empty markers and mismatches fail download. The [README code-signing and distribution instructions](../README.md#reusable-technician-download) describe unsigned, Windows signed, and macOS signing restrictions.
 
 ## Secondary: help someone remotely
 
@@ -61,7 +65,7 @@ The server can allow this capability with `REBOOT_RECONNECT` (enabled by default
 
 The [roadmap](../ROADMAP.md) describes proposed features and implementation order. None of the following should be read as already delivered:
 
-- Reusable technician downloads and agent-generated join codes.
+- Agent-generated join codes.
 - Machine labels, ticket references, and notes.
 - Explicit locally approved temporary access windows and improved elevation reliability.
 - An optional temporary Windows service for supported access across logout, reboot, and desktop transitions. Login, lock, and UAC behavior needs Windows validation; no secure-desktop capability is promised yet.
@@ -71,3 +75,14 @@ The [roadmap](../ROADMAP.md) describes proposed features and implementation orde
 Portable mode will remain available. Future temporary service mode must have explicit administrator approval, bounded access, visible status where supported, and cleanup; it is not a permanent RMM replacement.
 
 See the [README](../README.md) for deployment and configuration and the [security policy](../SECURITY.md) for the current access model and vulnerability reporting.
+
+## Reusable-agent platform validation checklist
+
+Automated checks cover server-only stamps, authenticated distribution, missing builds, invalid URLs, signed macOS payload preservation, the manual setup form, and user-config storage from a read-only working directory on Linux. These checks do not establish native Windows/macOS runtime or signature validity.
+
+Before release, use disposable targets:
+
+1. Windows: run unsigned and Authenticode-signed reusable downloads from a read-only USB/share; verify the displayed server, blank code, Allow/Decline, successful session, signature validity, and no session files beside the executable. Repeat the session-specific download flow.
+2. macOS: test stampable and signed/notarized builds, normal Gatekeeper and OS permission prompts, the blank-code setup, and session-specific bundle naming. Verify signature/notarization after download. Confirm legacy or mismatched signed configuration fails reusable download visibly.
+3. Linux X11: launch the built reusable agent from read-only media, enter a new console code, approve and end a session, and check no state is written to the medium. Repeat from a network share.
+4. Enable reconnect using a disposable session: verify state lives in the user configuration directory and is removed on end. Keep the executable available for the reboot test; then verify missing media prevents relaunch without putting credentials on that media. Do not treat this as pre-login service access.
