@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>SimpleRemote</string>
+	<key>CFBundleDisplayName</key>
+	<string>SimpleRemote</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.github.photoncody.simpleremote</string>
+	<key>CFBundleExecutable</key>
+	<string>simpleremote-agent</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>__VERSION__</string>
+	<key>CFBundleVersion</key>
+	<string>__VERSION__</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>12.3</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>SimpleRemote shares your screen with your support technician during a session you approve.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>SimpleRemote lets your support technician use your keyboard and mouse during a session you approve.</string>
+</dict>
+</plist>

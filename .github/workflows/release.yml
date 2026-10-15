@@ -1,0 +1,170 @@
+name: Release
+
+# Push a tag like v1.2.3 to build signed (when configured) agents, publish the
+# Docker image to GHCR, and create a GitHub release.
+#
+# Optional signing secrets:
+#   Windows: WINDOWS_CERT_PFX_BASE64, WINDOWS_CERT_PASSWORD
+#   macOS:   APPLE_CERT_P12_BASE64, APPLE_CERT_PASSWORD, APPLE_SIGN_IDENTITY,
+#            APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD, MACOS_DEFAULT_SERVER
+# Without them the agents are published unsigned.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  agents:
+    name: Agent (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - { target: linux-amd64, os: ubuntu-latest }
+          - { target: linux-arm64, os: ubuntu-24.04-arm }
+          - { target: windows-amd64, os: windows-latest }
+          - { target: darwin-universal, os: macos-latest }
+    env:
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Install build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc pkg-config libgl1-mesa-dev xorg-dev \
+            libxtst-dev libwayland-dev libxkbcommon-dev wayland-protocols
+      - name: Ensure a C compiler (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          if ! command -v gcc >/dev/null; then
+            choco install mingw -y --no-progress
+            echo "C:\\ProgramData\\mingw64\\mingw64\\bin" >> "$GITHUB_PATH"
+          fi
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist/agents
+          go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \
+            -o dist/agents/simpleremote-agent-${{ matrix.target }} ./agent/cmd/simpleremote-agent
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist/agents
+          go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=$VERSION" \
+            -o dist/agents/simpleremote-agent-windows-amd64.exe ./agent/cmd/simpleremote-agent
+      - name: Sign (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CERT: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if (-not $env:CERT) { Write-Host "::warning::Windows signing secrets not set; publishing an unsigned agent"; exit 0 }
+          $pfx = "$env:RUNNER_TEMP\cert.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
+          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $pfx /p $env:CERT_PASSWORD dist/agents/simpleremote-agent-windows-amd64.exe
+          Remove-Item $pfx
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Import signing certificate (macOS)
+        if: runner.os == 'macOS'
+        env:
+          CERT: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          if [ -z "$CERT" ]; then echo "::warning::macOS signing secrets not set; publishing an ad-hoc signed app"; exit 0; fi
+          kc="$RUNNER_TEMP/build.keychain"
+          security create-keychain -p ci "$kc"
+          security set-keychain-settings -lut 3600 "$kc"
+          security unlock-keychain -p ci "$kc"
+          echo "$CERT" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$kc"
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        env:
+          MACOS_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          DEFAULT_SERVER: ${{ secrets.MACOS_DEFAULT_SERVER }}
+        run: scripts/build-macos-app.sh "$VERSION" dist/agents
+      - name: Notarize (macOS)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          if [ -z "$APPLE_ID" ]; then exit 0; fi
+          zip=dist/agents/simpleremote-agent-darwin-universal.zip
+          xcrun notarytool submit "$zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          tmp="$RUNNER_TEMP/staple"; mkdir -p "$tmp"
+          ditto -x -k "$zip" "$tmp"
+          xcrun stapler staple "$tmp/SimpleRemote.app"
+          rm "$zip"
+          ditto -c -k --keepParent "$tmp/SimpleRemote.app" "$zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-${{ matrix.target }}
+          path: dist/agents/simpleremote-agent-*
+
+  publish:
+    name: Docker image and GitHub release
+    needs: agents
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: agent-*
+          path: dist/agents
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist/agents && sha256sum simpleremote-agent-* > SHA256SUMS && cat SHA256SUMS
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ github.ref_name }}
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/agents/simpleremote-agent-* dist/agents/SHA256SUMS \
+            --title "${{ github.ref_name }}" --generate-notes \
+            $([[ "${{ github.ref_name }}" == *-* ]] && echo --prerelease)
