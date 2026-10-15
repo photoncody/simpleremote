@@ -6,7 +6,7 @@
 # Agent binaries are copied from dist/agents/ (CI fills it from the agent
 # build jobs). You can also mount your own builds at /app/agents.
 
-FROM --platform=$BUILDPLATFORM node:24-alpine AS web
+FROM --platform=$BUILDPLATFORM node:25-alpine AS web
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
