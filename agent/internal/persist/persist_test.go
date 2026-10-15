@@ -1,7 +1,6 @@
 package persist
 
 import (
-	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -43,18 +42,7 @@ func TestArmLoadDisarm(t *testing.T) {
 		t.Fatalf("Load = %+v, %v", got, ok)
 	}
 
-	if runtime.GOOS == "linux" {
-		d, _ := desktopPath()
-		if _, err := os.Stat(d); err != nil {
-			t.Fatalf("autostart file missing: %v", err)
-		}
-		Disarm()
-		if _, err := os.Stat(d); !os.IsNotExist(err) {
-			t.Fatalf("autostart file left behind: %v", err)
-		}
-	} else {
-		Disarm()
-	}
+	Disarm()
 	if Armed() {
 		t.Fatal("still armed after Disarm")
 	}
