@@ -2,7 +2,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/csv"
 	"errors"
 	"io/fs"
@@ -158,10 +157,10 @@ func (s *Server) downloadReusable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st := stamp.Stamp{ServerURL: s.Config.PublicURL.String(), OrgName: s.Config.OrgName}
-	// Prepare before sending headers so invalid/missing builds return an error,
-	// rather than a successful download of a partial executable.
-	var out bytes.Buffer
-	if err := s.Dist.Write(&out, p, st); err != nil {
+	// Preparation is shared across requests; each response has its own reader
+	// over immutable cached bytes. Errors still precede all download headers.
+	artifact, err := s.Dist.Reusable(p, st)
+	if err != nil {
 		if errors.Is(err, dist.ErrUnavailable) {
 			httpx.Error(w, 404, "No agent build is installed for this platform.")
 			return
@@ -177,7 +176,7 @@ func (s *Server) downloadReusable(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("Content-Disposition", `attachment; filename="`+dist.Filename(p, "")+`"`)
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(out.Bytes())
+	http.ServeContent(w, r, dist.Filename(p, ""), time.Time{}, artifact)
 }
 
 func tech(r *http.Request) auth.Identity {

@@ -184,6 +184,22 @@ func TestReusableAgentRoutes(t *testing.T) {
 	if resp.Header.Get("Cache-Control") != "no-store" || !strings.Contains(resp.Header.Get("Content-Disposition"), "SimpleRemote-Technician.exe") {
 		t.Fatal("download headers")
 	}
+	// A second request uses the prepared artifact and has an independent
+	// streaming reader, including standard HTTP range handling.
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/agents/windows-amd64", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Range", "bytes=0-1")
+	resp, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil || resp.StatusCode != http.StatusPartialContent || string(prefix) != "MZ" || resp.ContentLength != 2 {
+		t.Fatalf("range download = %d %q %v", resp.StatusCode, prefix, err)
+	}
 	if len(m.List(auth.Identity{Subject: "local|admin"})) != 0 {
 		t.Fatal("download created a session")
 	}
