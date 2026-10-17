@@ -118,3 +118,16 @@ func TestTrustedProxies(t *testing.T) {
 		t.Errorf("TrustedProxies = %v", c.TrustedProxies)
 	}
 }
+
+func TestPublicURLContainsOnlyPublicConfiguration(t *testing.T) {
+	for _, raw := range []string{"", "https://user:private-secret@support.example.com", "https://support.example.com?token=private-secret", "https://support.example.com#private-secret"} {
+		env := base()
+		env["PUBLIC_URL"] = raw
+		_, err := load(mapEnv(env))
+		if err == nil {
+			t.Errorf("accepted invalid PUBLIC_URL")
+		} else if strings.Contains(err.Error(), "private-secret") {
+			t.Fatal("configuration error exposed credentials")
+		}
+	}
+}

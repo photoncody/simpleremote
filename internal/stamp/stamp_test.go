@@ -94,3 +94,25 @@ func TestCodeHelpers(t *testing.T) {
 		}
 	}
 }
+
+func TestReusableStampAndServerValidation(t *testing.T) {
+	s := Stamp{ServerURL: "https://support.example.com", OrgName: "Acme"}
+	var out bytes.Buffer
+	if err := Write(&out, []byte("binary"), s); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(out.Bytes())
+	if err != nil || got != s {
+		t.Fatalf("reusable stamp = %+v, %v", got, err)
+	}
+	for _, raw := range []string{"", "https://", "ftp://support.example.com", "https://user:secret@support.example.com", "https://support.example.com?token=secret", "https://support.example.com#secret"} {
+		if err := (Stamp{ServerURL: raw}).Validate(); err == nil {
+			t.Errorf("accepted invalid URL %q", raw)
+		}
+	}
+	for _, raw := range []string{"https://support.example.com", "http://localhost:8080", "https://support.example.com/support"} {
+		if err := ValidateServerURL(raw); err != nil {
+			t.Errorf("rejected %q: %v", raw, err)
+		}
+	}
+}

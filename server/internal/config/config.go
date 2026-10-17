@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/photoncody/simpleremote/internal/stamp"
 )
 
 // Config holds all server settings.
@@ -105,8 +107,8 @@ func load(getenv func(string) string) (*Config, error) {
 
 	if raw := e.str("PUBLIC_URL", ""); raw == "" {
 		e.fail("PUBLIC_URL is required (for example https://support.example.com)")
-	} else if u, err := url.Parse(strings.TrimRight(raw, "/")); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-		e.fail("PUBLIC_URL must be an absolute http(s) URL, got %q", raw)
+	} else if u, err := url.Parse(strings.TrimRight(raw, "/")); err != nil || stamp.ValidateServerURL(u.String()) != nil {
+		e.fail("PUBLIC_URL must be an absolute HTTP(S) URL without credentials, query or fragment")
 	} else {
 		c.PublicURL = u
 	}

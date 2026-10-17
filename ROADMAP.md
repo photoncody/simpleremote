@@ -23,7 +23,7 @@ Each task should update its status below and describe what was delivered, verifi
 | Item | Phase | Deliverable | Depends on | Status |
 | --- | --- | --- | --- | --- |
 | 01 | Foundation | Mission and workflow alignment | — | Complete |
-| 02 | Fast access | Reusable technician agent | 01 | Planned |
+| 02 | Fast access | Reusable technician agent | 01 | Implementation complete; native platform validation pending |
 | 03 | Fast access | Agent-generated join code | 02 | Planned |
 | 04 | Session organization | Machine labels and notes | 03 | Planned |
 | 05 | Access continuity | Explicit temporary access window | 03 | Planned |
@@ -104,6 +104,22 @@ Inspect agent startup, its existing manual server/code UI and defaultServer supp
 
 Make execution from a read-only removable drive or network share work without writing session state beside the binary. Validate configurable server URLs using existing production transport rules. Add tests for generic versus session-specific downloads, missing configuration, and credential-free reusable assets. Document the USB/share workflow and satisfy item 02's acceptance criteria.
 ```
+
+### Step 02 delivery notes — October 15, 2026
+
+- Added authenticated reusable agent downloads and a discoverable technician-console section. Assets carry only the configured public server URL and organization, ask for a fresh code, and retain local consent. Session-specific downloads remain supported.
+- Extended the shared stamp format to accept an empty code; validated HTTP(S) URLs without embedded credentials, queries, or fragments at server startup and in stamps, setup, and agent transport. Existing HTTP development deployments remain supported; HTTPS remains recommended for production.
+- Reusable downloads reject already-stamped base assets to avoid retaining previous session information. Signed Windows builds use the existing certificate-table stamping path. Signed macOS builds preserve executable bytes and require the matching build-time URL in the signed no-stamp marker; legacy markers still work for session-specific downloads but require rebuilding for reusable downloads.
+- Existing reconnect state already uses user configuration storage. Added a read-only-working-directory test covering state permissions and cleanup; no credential storage beside the reusable binary was introduced. Media must remain available for reboot reconnect, and OS executable paging can still depend on it while running.
+- Verified Go vet, server/shared tests with race detection, all agent tests, Svelte check (zero errors/warnings), seven frontend tests, production web build, server build, and native Linux agent build. Added focused download/authentication/configuration/signing tests and a headless Fyne setup-form render/check.
+- Native Windows/macOS execution, real signature/notarization checks, and USB/network-share session/reboot integration remain pending. See the manual checklist in `docs/WORKFLOWS.md`. Implementation completion does not claim these platform results.
+- Deployment compatibility: server-only stamps require updated agents. Deploy updated server/UI with newly built agent assets; no wire-protocol or SQLite migration changes. No deployment or PR was performed for this task.
+
+### Step 02 review follow-up — October 17, 2026
+
+- Normalized trailing slashes when comparing signed macOS marker URLs with the public server URL, preserving signed executable bytes and rejecting genuinely different servers or paths.
+- Cached one immutable reusable artifact per platform and serialized preparation across requests. Each response streams through an independent reader; source-build or configuration changes replace the cache entry. Invalid builds still fail before download headers, and missing source files cannot serve stale cached downloads.
+- Added regression coverage for signed URLs with trailing slashes and base paths, concurrent reusable readers, cache reuse/replacement, failed-preparation recovery, and HTTP range streaming. Distribution/API race tests, server vet/build, and diff checks passed. A warm-cache benchmark with a 1 MiB artifact measured 560 B/op (5 allocations), rather than a per-request artifact-sized copy. Native signing/media validation remains pending as documented above.
 
 ## 03 — Agent-generated join code
 

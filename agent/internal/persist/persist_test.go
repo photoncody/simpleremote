@@ -1,8 +1,10 @@
 package persist
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -66,5 +68,43 @@ func TestArmRejectsEmpty(t *testing.T) {
 	}
 	if Armed() {
 		t.Fatal("armed despite error")
+	}
+}
+
+func TestStateStaysOffReadOnlyWorkingDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("avoids real HKCU Run key")
+	}
+	configRoot := isolate(t)
+	drive := t.TempDir()
+	if err := os.Chmod(drive, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(drive, 0700) })
+	t.Chdir(drive)
+	info := Info{ServerURL: "https://support.example.com", ResumeToken: "private-session-token", Expires: time.Now().Add(time.Hour)}
+	if err := Arm(info); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(Disarm)
+	path, err := filePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(configRoot, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		t.Fatal("state outside user config")
+	}
+	entries, err := os.ReadDir(drive)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("wrote beside working directory: %v %v", entries, err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil || fi.Mode().Perm() != 0600 {
+		t.Fatalf("state permissions: %v %v", fi, err)
+	}
+	Disarm()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("state not removed: %v", err)
 	}
 }

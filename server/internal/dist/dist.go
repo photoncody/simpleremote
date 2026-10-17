@@ -52,6 +52,12 @@ type Dist struct {
 
 	mu    sync.Mutex
 	cache map[string]cached
+
+	// Serialize reusable artifact preparation, including cold concurrent requests.
+	// There is at most one generated artifact per installed platform, never per
+	// request or URL. Readers keep immutable snapshots while replacements build.
+	reusableMu sync.Mutex
+	reusable   map[string]reusableCached
 }
 
 type cached struct {
@@ -60,9 +66,16 @@ type cached struct {
 	data []byte
 }
 
+type reusableCached struct {
+	mod   time.Time
+	size  int64
+	stamp stamp.Stamp
+	data  []byte
+}
+
 // New creates a Dist for dir.
 func New(dir string) *Dist {
-	return &Dist{dir: dir, cache: map[string]cached{}}
+	return &Dist{dir: dir, cache: map[string]cached{}, reusable: map[string]reusableCached{}}
 }
 
 // Available lists the platforms with a build present.
@@ -90,38 +103,77 @@ func Lookup(id string) (Platform, bool) {
 // ErrUnavailable means the build for a platform is not installed.
 var ErrUnavailable = errors.New("agent build not available for this platform")
 
-func (d *Dist) load(p Platform) ([]byte, error) {
+func (d *Dist) load(p Platform) (cached, error) {
 	path := filepath.Join(d.dir, p.file)
 	fi, err := os.Stat(path)
 	if err != nil {
-		return nil, ErrUnavailable
+		return cached{}, ErrUnavailable
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if c, ok := d.cache[p.ID]; ok && c.mod.Equal(fi.ModTime()) && c.size == fi.Size() {
-		return c.data, nil
+		return c, nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return cached{}, err
 	}
-	if p.ext == "" {
-		data = stamp.Strip(data)
-	}
-	d.cache[p.ID] = cached{mod: fi.ModTime(), size: fi.Size(), data: data}
-	return data, nil
+	c := cached{mod: fi.ModTime(), size: fi.Size(), data: data}
+	d.cache[p.ID] = c
+	return c, nil
 }
 
 // Filename is the name the browser saves the download as.
 func Filename(p Platform, code string) string {
+	if code == "" {
+		return "SimpleRemote-Technician" + p.ext
+	}
 	return "SimpleRemote-" + code + p.ext
 }
 
 // Write streams the stamped agent for platform p to w.
 func (d *Dist) Write(w io.Writer, p Platform, s stamp.Stamp) error {
-	base, err := d.load(p)
+	build, err := d.load(p)
 	if err != nil {
 		return err
+	}
+	return write(w, p, build.data, s)
+}
+
+// Reusable prepares a public-configuration-only artifact once and returns an
+// independent reader over its immutable cached bytes. A changed source build
+// (mtime/size, as with the base cache) or configuration replaces that platform's
+// entry. Failed preparation is never published or served as a partial download.
+func (d *Dist) Reusable(p Platform, s stamp.Stamp) (*bytes.Reader, error) {
+	if s.Code != "" {
+		return nil, errors.New("reusable agent cannot contain a session code")
+	}
+	if err := s.Validate(); err != nil {
+		return nil, err
+	}
+	d.reusableMu.Lock()
+	defer d.reusableMu.Unlock()
+	build, err := d.load(p)
+	if err != nil {
+		return nil, err
+	}
+	if c, ok := d.reusable[p.ID]; ok && c.mod.Equal(build.mod) && c.size == build.size && c.stamp == s {
+		return bytes.NewReader(c.data), nil
+	}
+	var out bytes.Buffer
+	if err := write(&out, p, build.data, s); err != nil {
+		return nil, err
+	}
+	data := out.Bytes()
+	d.reusable[p.ID] = reusableCached{mod: build.mod, size: build.size, stamp: s, data: data}
+	return bytes.NewReader(data), nil
+}
+
+func write(w io.Writer, p Platform, base []byte, s stamp.Stamp) error {
+	if s.Code == "" && p.ext != ".zip" {
+		if _, err := stamp.Parse(base); !errors.Is(err, stamp.ErrNotStamped) {
+			return errors.New("reusable agent requires an unstamped base executable")
+		}
 	}
 	if p.ext == ".zip" {
 		return stampZip(w, base, s)
@@ -129,6 +181,9 @@ func (d *Dist) Write(w io.Writer, p Platform, s stamp.Stamp) error {
 	trailer, err := stamp.Trailer(s)
 	if err != nil {
 		return err
+	}
+	if p.ext == "" {
+		base = stamp.Strip(base)
 	}
 	if p.ext == ".exe" {
 		// Keeps an Authenticode signature valid. Anything that doesn't parse
@@ -163,10 +218,47 @@ func stampZip(w io.Writer, base []byte, s stamp.Stamp) error {
 	}
 	const bundle = "SimpleRemote.app/"
 	newBundle := "SimpleRemote-" + s.Code + ".app/"
+	if s.Code == "" {
+		newBundle = "SimpleRemote-Technician.app/"
+	}
 	noStamp := false
 	for _, f := range zr.File {
 		if strings.HasSuffix(f.Name, ".app/"+NoStampMarker) {
 			noStamp = true
+			if s.Code == "" {
+				rc, err := f.Open()
+				if err != nil {
+					return err
+				}
+				configured, err := io.ReadAll(io.LimitReader(rc, 8193))
+				rc.Close()
+				if err != nil {
+					return err
+				}
+				// Config loading removes all trailing slashes from PUBLIC_URL.
+				// Match equivalent build-time URLs without modifying the signed bundle.
+				if strings.TrimRight(strings.TrimSpace(string(configured)), "/") != strings.TrimRight(s.ServerURL, "/") {
+					return errors.New("signed macOS reusable agent must be rebuilt with the matching public server URL marker")
+				}
+			}
+		}
+	}
+	if noStamp && s.Code == "" {
+		for _, f := range zr.File {
+			if strings.Contains(f.Name, ".app/Contents/MacOS/") && !f.FileInfo().IsDir() {
+				rc, err := f.Open()
+				if err != nil {
+					return err
+				}
+				data, err := io.ReadAll(rc)
+				rc.Close()
+				if err != nil {
+					return err
+				}
+				if _, err := stamp.Parse(data); !errors.Is(err, stamp.ErrNotStamped) {
+					return errors.New("signed reusable agent contains a stamp")
+				}
+			}
 		}
 	}
 	zw := zip.NewWriter(w)
@@ -199,6 +291,11 @@ func stampZip(w io.Writer, base []byte, s stamp.Stamp) error {
 		rc.Close()
 		if err != nil {
 			return err
+		}
+		if s.Code == "" {
+			if _, err := stamp.Parse(data); !errors.Is(err, stamp.ErrNotStamped) {
+				return errors.New("reusable agent requires unstamped bundle executables")
+			}
 		}
 		hdr.CRC32, hdr.CompressedSize64, hdr.UncompressedSize64 = 0, 0, 0
 		hdr.Method = zip.Deflate

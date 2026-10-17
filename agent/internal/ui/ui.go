@@ -6,7 +6,6 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
@@ -140,8 +139,7 @@ func (u *App) showSetup() {
 		if !strings.Contains(s, "://") {
 			s = "https://" + s
 		}
-		pu, err := url.Parse(s)
-		if err != nil || pu.Host == "" || (pu.Scheme != "https" && pu.Scheme != "http") {
+		if err := stamp.ValidateServerURL(s); err != nil {
 			errLabel.SetText("Enter the support website address.")
 			return
 		}
